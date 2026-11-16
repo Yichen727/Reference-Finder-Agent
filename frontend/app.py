@@ -34,6 +34,9 @@ def select_reference(run_id: str, item_id: str, key: str):
     order = st.session_state["pack_drafts"][run_id]["ordered_ids"]
     if st.session_state[key] and item_id not in order:
         order.append(item_id)
+        rejected = st.session_state["pack_drafts"][run_id].setdefault("rejected_ids", [])
+        if item_id in rejected:
+            rejected.remove(item_id)
     elif not st.session_state[key] and item_id in order:
         order.remove(item_id)
     changed(run_id)
@@ -56,6 +59,22 @@ def move_reference(run_id: str, item_id: str, offset: int):
 def remove_reference(run_id: str, item_id: str):
     st.session_state["pack_drafts"][run_id]["ordered_ids"].remove(item_id)
     st.session_state[f"pick_{run_id}_{item_id}"] = False
+    changed(run_id)
+
+
+def exclude_reference(run_id: str, item_id: str):
+    draft = st.session_state["pack_drafts"][run_id]
+    rejected = draft.setdefault("rejected_ids", [])
+    if item_id not in rejected:
+        rejected.append(item_id)
+    if item_id in draft["ordered_ids"]:
+        draft["ordered_ids"].remove(item_id)
+    st.session_state[f"pick_{run_id}_{item_id}"] = False
+    changed(run_id)
+
+
+def restore_excluded(run_id: str):
+    st.session_state["pack_drafts"][run_id]["rejected_ids"] = []
     changed(run_id)
 
 
@@ -134,6 +153,7 @@ def sidebar(health):
                         "stage": run["stage"],
                         "usage": run.get("usage", {}),
                         "coverage": run.get("coverage", []),
+                        "page_checks": run.get("page_checks", []),
                     }
                 )
                 for warning in run.get("warnings", []):
@@ -274,6 +294,10 @@ def poll_run(run_id):
             message = "Your research is queued..."
         elif stage == "organizing_search_evidence":
             message = "Putting your references together..."
+        elif stage == "checking_public_pages":
+            message = "Checking source pages..."
+        elif stage == "ranking_and_deduplicating":
+            message = "Selecting distinct, useful references..."
         st.info(message)
     except APIError as error:
         display_error(error)
@@ -297,10 +321,19 @@ def reference_card(run, item, draft):
         st.session_state.setdefault(key, item_id in draft["ordered_ids"])
         select.checkbox("Add to Pack", key=key, on_change=select_reference, args=(run_id, item_id, key))
         with st.expander("Details / Edit"):
+            check = item.get("page_check")
+            if check:
+                st.caption(f"Source page: {check['status']} / {check['reason']}")
+                if check.get("final_url") and check["final_url"] != item["source_url"]:
+                    st.link_button("Checked Destination", check["final_url"], key=f"checked_{item_id}")
             if item.get("creator"):
                 st.caption(f"Creator: {item['creator']}")
             if item["tags"]:
                 st.caption(" / ".join(item["tags"]))
+            st.caption(
+                "Source descriptions report evidence; borrowing ideas, route fit and production notes "
+                "are creative interpretations."
+            )
             for field, label in EDIT_FIELDS.items():
                 edit_key = f"edit_{run_id}_{item_id}_{field}"
                 st.session_state.setdefault(edit_key, annotation[field])
@@ -316,12 +349,26 @@ def reference_card(run, item, draft):
             for evidence in run["evidence"]:
                 if evidence["id"] in item["evidence_ids"]:
                     st.caption(f"{evidence['evidence_type']} / {evidence['retrieved_at']}")
-                    st.write(evidence["excerpt"])
+                    st.text(evidence["excerpt"])
                     st.link_button(
                         "Evidence Source",
                         evidence["source_url"],
                         key=f"source_{run_id}_{item_id}_{evidence['id']}",
                     )
+            if item.get("ranking"):
+                rank = item["ranking"]
+                st.caption(f"Recommendation fit: {rank['score']:.0f}/100 / {rank['role'].replace('_', ' ')}")
+                for reason in rank["reasons"]:
+                    st.caption(reason)
+                st.caption(rank["selection_note"])
+            for index, url in enumerate(item.get("alternate_urls", [])):
+                st.link_button("Alternate Source", url, key=f"alternate_{item_id}_{index}")
+            st.button(
+                "Exclude Reference",
+                key=f"exclude_{item_id}",
+                on_click=exclude_reference,
+                args=(run_id, item_id),
+            )
 
 
 def export_pack(run: dict, draft: dict):
@@ -399,15 +446,44 @@ def result_panel():
         poll_run(run["id"])
         return
     if run["status"] not in {"completed", "partial"}:
-        st.error("We could not complete this research. Start new research or check Developer Settings.")
+        if run.get("error_code") in {"no_eligible_references", "no_search_evidence"}:
+            st.error(
+                "No usable references remained after source checks. Try a different idea or broader sources."
+            )
+        else:
+            st.error("We could not complete this research. Start new research or check Developer Settings.")
         return
     draft = draft_for(run)
     st.subheader("References")
     st.caption(st.session_state["brief"]["concept"])
     if run["status"] == "partial":
-        st.info(f"Found {len(run['results'])} references. Some sources had limited coverage.")
+        st.info(f"Found {len(run['results'])} references. Some sources need review or had limited coverage.")
+    with st.expander("Filter Results"):
+        platforms = sorted({item["platform"] for item in run["results"]})
+        strands = sorted({item["strand"] for item in run["results"]})
+        source_filter = st.multiselect("Source", platforms, key=f"source_filter_{run['id']}")
+        strand_filter = st.multiselect("Creative Strand", strands, key=f"strand_filter_{run['id']}")
+        evidence_filter = st.selectbox(
+            "Evidence", ["All", "Page checked", "Needs review"], key=f"evidence_filter_{run['id']}"
+        )
+        if draft.get("rejected_ids"):
+            st.caption(f"{len(draft['rejected_ids'])} references excluded.")
+            st.button("Restore Excluded References", on_click=restore_excluded, args=(run["id"],))
+    visible = [
+        item
+        for item in run["results"]
+        if item["id"] not in draft.get("rejected_ids", [])
+        and (not source_filter or item["platform"] in source_filter)
+        and (not strand_filter or item["strand"] in strand_filter)
+        and (
+            evidence_filter == "All"
+            or (item["verification_status"] == "supported") == (evidence_filter == "Page checked")
+        )
+    ]
+    if not visible:
+        st.info("No references match these filters. Adjust the filters or restore excluded references.")
     columns = st.columns(2)
-    for index, item in enumerate(run["results"]):
+    for index, item in enumerate(visible):
         with columns[index % 2]:
             reference_card(run, item, draft)
     st.divider()

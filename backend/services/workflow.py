@@ -91,6 +91,7 @@ class Workflow:
                         "warnings": outcome.warnings,
                         "usage": outcome.usage,
                         "coverage": outcome.coverage,
+                        "page_checks": outcome.page_checks,
                         "error_code": outcome.error_code,
                         "status": status,
                         "stage": status,
@@ -131,6 +132,8 @@ class Workflow:
             valid_ids = {item.id for item in run.results}
             if not set(value.ordered_ids) <= valid_ids:
                 raise AppError("invalid_selection", "Selection contains references outside this run.", 422)
+            if not set(value.rejected_ids) <= valid_ids:
+                raise AppError("invalid_selection", "Rejected references must belong to this run.", 422)
             if not set(value.annotation_overrides) <= set(value.ordered_ids):
                 raise AppError(
                     "invalid_override", "Only selected references may have annotation overrides.", 422

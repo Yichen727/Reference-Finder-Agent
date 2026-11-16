@@ -12,8 +12,9 @@ The workspace provides real external reference discovery:
 5. Click **Export Reference Pack** to save the latest edits and prepare a DOCX download.
 
 Search uses OpenAI Web Search. It records source citations, coverage, timestamps and
-request/token usage. Restricted platforms may return fewer works or none. Individual pages
-and full videos have not yet been independently inspected; that deeper verification is Phase 3.
+request/token usage. Phase 3 checks readable public pages, merges repeated works and ranks
+the shortlist with source-backed creative reasons. Restricted platforms may return fewer
+works or none. Full videos and production budgets are not independently analysed.
 Internal decks remain deferred. The demonstration provider and runtime mode have been removed.
 Archived demonstration records remain readable for compatibility, are hidden from Recent
 Research, and cannot be reused or exported as real references.
@@ -26,7 +27,12 @@ opt-in. Manual query review is never required for the default workflow.
 
 Cards show the work title, source, creative strand, a short **What to Borrow**, **View Original**
 and **Add to Pack**. **Details / Edit** contains full annotations, production observations,
-evidence, verification, assumptions and usage notes. Images appear only when thumbnail
+evidence, page status, ranking reasons, alternate sources, assumptions and usage notes.
+The collapsed **Filter Results** section filters sources, creative strands and evidence
+status. **Exclude Reference** removes a candidate from browsing and the pack;
+**Restore Excluded References** brings it back. Filters never deselect hidden references
+or discard annotation edits. Export saves explicit exclusions with the selection.
+Images appear only when thumbnail
 metadata explicitly confirms an approved usage status and availability; there is a text-only
 fallback and no automatic image invention or collection.
 
@@ -137,14 +143,77 @@ not connect dedicated platform APIs or guarantee exhaustive platform coverage.
 
 Only URLs returned in completed search-tool metadata/citations can become references.
 The curation model selects evidence IDs and cannot supply a new URL. Unknown evidence IDs,
-unmatched work titles and disallowed categories are discarded. The returned shortlist is
-capped at 15, with basic URL/title deduplication. Full work-level deduplication and creative
-quality ranking remain Phase 3.
+unmatched titles, unsupported numeric/award descriptions and disallowed categories are
+discarded. The returned shortlist is capped at 15 after quality filtering and work-level
+deduplication, with fewer results when necessary.
 
 Search summaries are generated research notes adjacent to citations. They are labelled as
-`search_summary` and `unverified`, rather than independent page verification. Consulted-only
-URLs are saved as provenance but cannot become a recommended work without a cited description.
-Creator names are omitted when absent from the supplied evidence; rights are not assumed.
+`search_summary`, rather than independent page verification. Readable work-page text is
+saved separately as `page_text`. Consulted-only URLs need readable individual-work text
+before becoming recommendations. Creator names are omitted when absent from the effective
+evidence; rights are not assumed.
+
+### Public-page verification
+
+The checker sends bounded, unauthenticated GET requests using the
+`AtomizedReferenceFinder` user agent. It reads robots.txt first, respects disallow rules
+and crawl delays, checks robots on redirected origins and never follows embedded media.
+HTTP 429 stops further requests to that origin for the run; denied robots responses are
+reused rather than repeatedly requested for each candidate.
+Every destination must use HTTP(S) on port 80 or 443 and resolve entirely to public
+unicast addresses. The connection uses the validated IP with the original Host header
+and TLS/SNI identity, preventing a second DNS lookup from redirecting the connection into
+a private network. Proxies, cookies and authorization headers are not forwarded.
+
+Inspection distinguishes `accessible`, `restricted`, `unreachable`, `unverified` and
+`blocked`. HTTP 200 login/challenge pages do not count as verified works. Generic index
+pages, dead links and unsafe destinations are excluded. Network/time/size limits and
+access restrictions remain explicit; a search-backed candidate can still appear with
+low confidence and a review note when the page could not be checked.
+
+Only a readable, identifiable work page yields `supported` status and at most medium
+annotation confidence. This verifies source text and work identity, not every source
+claim, the complete video, a definitive production method or reproduction permission.
+Page bodies are treated as data, with scripts and navigation omitted; retrieved text
+cannot call tools or override the curation instructions.
+
+| Setting | Default | Meaning |
+| --- | --- | --- |
+| `VERIFICATION_MAX_PAGES` | 18 | Candidate pages scheduled for checking |
+| `VERIFICATION_MAX_REQUESTS` | 60 | HTTP attempts including robots and redirects |
+| `VERIFICATION_WORKERS` | 4 | Bounded parallel page checks |
+| `VERIFICATION_TIMEOUT_SECONDS` | 8 | Per-request timeout ceiling |
+| `VERIFICATION_TOTAL_SECONDS` | 45 | Overall page-check time window |
+| `VERIFICATION_MAX_BYTES` | 1000000 | Maximum raw response body size |
+| `VERIFICATION_MAX_REDIRECTS` | 3 | Redirect limit per retrieval |
+
+Oversized, compressed and non-text responses are not processed. The checker deliberately
+does not bypass a site's access controls or execute JavaScript. Skipped checks remain
+unverified. The overall discovery deadline and final curation slot still apply.
+
+### Work identity and recommendation ranking
+
+Video IDs identify URL variants across YouTube/Vimeo embed, watch and short links.
+Specific project-page canonical links and embedded video identities connect alternate
+sources. Conservative title/creator comparisons avoid merging generic names, incompatible
+credits or distinct release years. The preferred source, supporting evidence and alternate
+links remain available after merging. A shared studio header video alone does not merge
+different projects.
+
+The curation model gives evidence-anchored editorial assessments. The backend uses
+relevance 30%, specificity/transferability 25%, evidenced craft 15%, source confidence 20%
+and constraint fit 10%. Source confidence combines the page checks with source authority:
+original work pages rank above repost-prone social sources. Search-only craft
+scores are capped, and missing production constraints limit feasibility confidence.
+Irrelevant work and unanchored assessments are excluded. A transparent baseline is used
+if an assessment is unavailable. Scores are review aids, not objective creative quality.
+
+Final selection balances this fit with different strands, creative roles, creators and
+sources. Awards and popularity do not add an automatic bonus. Notes explain the borrowing
+principle, route fit, evidence limits and early production considerations; ambitious
+executions can include lean alternatives. The final result set remains at most 15.
+Existing saved runs are preserved and are not silently reverified or reranked; these
+checks apply to new research.
 
 Default discovery limits (planning is a separate model request):
 
@@ -234,7 +303,9 @@ recovery, edited and ordered DOCX contents, clickable hyperlink relationships,
 sanitized provider failures, Streamlit curation, download preparation and fresh-session
 restoration, grounded source IDs, domain filtering, bounded retries, partial success and
 one-click search, optional strategy editing, navigation-safe drafts, Up/Down ordering,
-automatic save/export, late version conflicts and retries. Normal tests use a test-only
+automatic save/export, late version conflicts, retries, DNS pinning/private redirects,
+robots restrictions, bounded downloads, work merging, ranking and filtered/excluded drafts.
+Normal tests use a test-only
 provider and API test doubles; these are not runtime modes and do not spend API credits.
 DOCX content is checked programmatically; visual review in Microsoft Word
 belongs to the full export acceptance phase.
@@ -252,6 +323,8 @@ config/sources.json        Source categories, domains and coverage policies
 scripts/verify_live.py     Explicit live search and DOCX verification
 backend/repositories/      SQLite storage and atomic submission deduplication
 backend/services/          Workflow, selection validation and DOCX export
+backend/services/page_verification.py  Safe public-text and access checks
+backend/services/ranking.py            Work merging and diverse recommendation ranking
 prompts/                   Versioned research-planning prompt
 tests/                     API, provider and Streamlit integration tests
 run.py                     Local two-service launcher

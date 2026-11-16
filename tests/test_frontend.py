@@ -230,6 +230,48 @@ def test_saved_run_url_restores_the_exported_selection(bridge):
     assert widget(restored.checkbox, f"pick_{run['id']}_{run['results'][0]['id']}").value
 
 
+def test_filters_preserve_hidden_selections_and_annotation_edits(bridge, client):
+    app = launch(open_app())
+    run = SearchRun.model_validate(app.session_state["run"])
+    run.results[1].platform = "YouTube"
+    run.results[1].strand = "Execution"
+    client.app.state.workflow.repository.put("run", run)
+    restored = AppTest.from_file(str(APP), default_timeout=15)
+    restored.query_params["run"] = run.id
+    restored.run()
+    record = restored.session_state["run"]
+    first = record["results"][0]
+    pick(restored, record, 0)
+    edit_key = f"edit_{run.id}_{first['id']}_what_to_borrow"
+    widget(restored.text_area, edit_key).input("Preserve this annotation through filters").run()
+    widget(restored.multiselect, f"source_filter_{run.id}").set_value(["YouTube"]).run()
+    assert len(restored.checkbox) == 1
+    assert first["id"] in restored.session_state["pack_drafts"][run.id]["ordered_ids"]
+    widget(restored.multiselect, f"source_filter_{run.id}").set_value([]).run()
+    assert widget(restored.checkbox, f"pick_{run.id}_{first['id']}").value
+    assert widget(restored.text_area, edit_key).value == "Preserve this annotation through filters"
+    widget(restored.selectbox, f"evidence_filter_{run.id}").set_value("Page checked").run()
+    assert len(restored.checkbox) == 0
+    assert first["id"] in restored.session_state["pack_drafts"][run.id]["ordered_ids"]
+
+
+def test_exclusions_are_saved_with_the_pack_and_can_be_restored(bridge, client):
+    app = launch(open_app())
+    run = app.session_state["run"]
+    first, second = run["results"][:2]
+    pick(app, run, 0)
+    pick(app, run, 1)
+    widget(app.button, f"exclude_{second['id']}").click().run()
+    assert len(app.checkbox) == 2
+    assert second["id"] not in app.session_state["pack_drafts"][run["id"]]["ordered_ids"]
+    button(app, "Export Reference Pack").click().run()
+    saved = client.get(f"/search-runs/{run['id']}").json()["selection"]
+    assert saved["ordered_ids"] == [first["id"]] and saved["rejected_ids"] == [second["id"]]
+    button(app, "Restore Excluded References").click().run()
+    assert len(app.checkbox) == 3
+    assert not widget(app.checkbox, f"pick_{run['id']}_{second['id']}").value
+
+
 def test_only_available_approved_thumbnails_are_rendered(bridge, client, monkeypatch):
     app = launch(open_app())
     run = SearchRun.model_validate(app.session_state["run"])

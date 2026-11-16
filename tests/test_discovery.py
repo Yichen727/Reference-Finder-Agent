@@ -11,7 +11,15 @@ from pydantic import SecretStr
 from streamlit.testing.v1 import AppTest
 
 from backend.main import create_app
-from backend.schemas.models import Annotation, DiscoveredReference, DiscoveryDraft, QueryStrand, StrategyDraft
+from backend.schemas.models import (
+    Annotation,
+    CreativeAssessment,
+    DiscoveredReference,
+    DiscoveryDraft,
+    PageCheck,
+    QueryStrand,
+    StrategyDraft,
+)
 from backend.services.source_policy import canonical_url
 from frontend.api_client import APIClient, APIError
 
@@ -37,7 +45,33 @@ def discovery_api(monkeypatch):
         "inject_unknown": False,
         "no_tool": False,
         "no_citations": False,
+        "page_status": "accessible",
+        "generic_page": False,
+        "relevance": None,
+        "unidentified_page": False,
     }
+
+    def checked_pages(self, urls, **kwargs):
+        self.checked = len(urls)
+        result = {}
+        for url in urls:
+            title = "Shared Futures " + url.rsplit("-", 1)[-1]
+            result[url] = PageCheck(
+                original_url=url,
+                final_url=url,
+                title=title,
+                text=f"{title} by Example Studio. An environmental campaign with warm stories and humour. "
+                * 3,
+                status=state["page_status"],
+                work_page=not state["generic_page"],
+                reason="Test-only page check.",
+            )
+            if state["unidentified_page"]:
+                result[url].title = ""
+                result[url].text = "A readable but unrelated page with no identifiable work title. " * 5
+        return result
+
+    monkeypatch.setattr("backend.providers.discovery.PageVerifier.check_many", checked_pages)
 
     class Client:
         def __init__(self, **kwargs):
@@ -147,6 +181,17 @@ def discovery_api(monkeypatch):
                             production_note="Casting and access need producer review.",
                             confidence="high",
                         ),
+                        assessment=CreativeAssessment(
+                            relevance=state["relevance"],
+                            specificity=4,
+                            craft=3,
+                            feasibility=3,
+                            role="close_match",
+                            reasons=["A specific connection to the supplied creative route."],
+                            evidence_ids=[source["id"]],
+                        )
+                        if state["relevance"] is not None
+                        else None,
                     )
                 )
             if state["inject_unknown"]:
@@ -203,9 +248,10 @@ def test_live_search_records_sources_usage_and_exports(settings, discovery_api):
         assert len(run["coverage"]) == 7
         assert all(item["queries_attempted"] >= 1 for item in run["coverage"])
         assert all(
-            not item["is_mock"] and item["verification_status"] == "unverified" for item in run["results"]
+            not item["is_mock"] and item["verification_status"] == "supported" for item in run["results"]
         )
-        assert all(item["annotation"]["confidence"] == "low" for item in run["results"])
+        assert all(item["annotation"]["confidence"] == "medium" for item in run["results"])
+        assert all(item["ranking"] for item in run["results"])
         assert client.get("/health").json()["live_search_verified"]
         assert "test-key-do-not-return" not in json.dumps(run)
         saved = client.put(
@@ -230,6 +276,51 @@ def test_only_grounded_ids_can_become_reference_urls(settings, discovery_api):
     assert len(run["results"]) == 3
     assert all(item["title"] != "Invented work" for item in run["results"])
     assert any("Excluded" in warning for warning in run["warnings"])
+
+
+def test_restricted_pages_keep_search_only_evidence_with_low_confidence(settings, discovery_api):
+    discovery_api["page_status"] = "restricted"
+    with TestClient(create_app(live_settings(settings))) as client:
+        run = execute(client)
+    assert run["status"] == "partial" and run["results"]
+    assert all(item["verification_status"] == "unverified" for item in run["results"])
+    assert all(item["annotation"]["confidence"] == "low" for item in run["results"])
+    assert not any(item["evidence_type"] == "page_text" for item in run["evidence"])
+    assert all(check["status"] == "restricted" for check in run["page_checks"])
+
+
+@pytest.mark.parametrize("mode", ["dead", "generic"])
+def test_dead_links_and_generic_pages_cannot_become_recommendations(settings, discovery_api, mode):
+    discovery_api["page_status"] = "unreachable" if mode == "dead" else "accessible"
+    discovery_api["generic_page"] = mode == "generic"
+    with TestClient(create_app(live_settings(settings))) as client:
+        run = execute(client)
+    assert run["status"] == "failed" and not run["results"]
+    assert run["page_checks"]
+    assert run["usage"]["requests_attempted"] == 4  # No curation call when every source is unusable.
+
+
+def test_consulted_only_source_needs_readable_work_text_before_recommendation(settings, discovery_api):
+    discovery_api["no_citations"] = True
+    with TestClient(create_app(live_settings(settings))) as client:
+        run = execute(client)
+    assert run["results"] and all(item["verification_status"] == "supported" for item in run["results"])
+    assert any(item["evidence_type"] == "page_text" for item in run["evidence"])
+
+
+def test_model_relevance_gate_excludes_off_brief_work_even_when_page_exists(settings, discovery_api):
+    discovery_api["relevance"] = 1
+    with TestClient(create_app(live_settings(settings))) as client:
+        run = execute(client)
+    assert run["status"] == "failed" and not run["results"]
+    assert run["error_code"] == "no_eligible_references"
+
+
+def test_search_title_is_not_reused_as_independent_page_identity(settings, discovery_api):
+    discovery_api["unidentified_page"] = True
+    with TestClient(create_app(live_settings(settings))) as client:
+        run = execute(client)
+    assert run["status"] == "failed" and not run["results"]
 
 
 def test_domain_preferences_and_budget_are_enforced(settings, discovery_api):
@@ -273,6 +364,7 @@ def test_transient_failure_retries_within_global_budget(settings, discovery_api)
 @pytest.mark.parametrize("mode", ["no_tool", "no_citations"])
 def test_search_without_tool_or_cited_work_cannot_fake_success(settings, discovery_api, mode):
     discovery_api[mode] = True
+    discovery_api["page_status"] = "unverified"
     with TestClient(create_app(live_settings(settings))) as client:
         run = execute(client)
     assert run["status"] == "failed" and not run["results"]

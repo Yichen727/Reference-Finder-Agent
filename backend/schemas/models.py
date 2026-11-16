@@ -108,6 +108,38 @@ class ApprovedThumbnail(Model):
     available: bool = False
 
 
+class PageCheck(Model):
+    original_url: Text
+    final_url: HttpUrl | None = None
+    status: Literal["accessible", "restricted", "unreachable", "unverified", "blocked"] = "unverified"
+    reason: Text = ""
+    http_status: int | None = None
+    title: Text = ""
+    text: Text = ""
+    canonical_url: HttpUrl | None = None
+    media_urls: list[HttpUrl] = Field(default_factory=list, max_length=12)
+    work_page: bool = False
+    checked_at: datetime = Field(default_factory=now)
+
+
+class CreativeAssessment(Model):
+    relevance: int = Field(ge=0, le=5)
+    specificity: int = Field(ge=0, le=5)
+    craft: int = Field(ge=0, le=5)
+    feasibility: int = Field(ge=0, le=5)
+    role: Literal["close_match", "execution", "aspirational", "unexpected"]
+    reasons: list[Text] = Field(min_length=1, max_length=5)
+    evidence_ids: list[str] = Field(min_length=1, max_length=10)
+
+
+class RankingDetails(Model):
+    score: float = Field(ge=0, le=100)
+    components: dict[str, float] = Field(max_length=5)
+    reasons: list[Text] = Field(max_length=10)
+    role: Literal["close_match", "execution", "aspirational", "unexpected"] = "close_match"
+    selection_note: Text = ""
+
+
 class ReferenceItem(Model):
     id: str
     title: Text
@@ -121,6 +153,11 @@ class ReferenceItem(Model):
     verification_status: Literal["mock", "unverified", "supported"] = "unverified"
     is_mock: bool = False
     thumbnail: ApprovedThumbnail | None = None
+    alternate_urls: list[HttpUrl] = Field(default_factory=list, max_length=20)
+    page_check: PageCheck | None = None
+    ranking: RankingDetails | None = None
+    assessment: CreativeAssessment | None = None
+    merged_count: int = Field(default=1, ge=1)
     annotation: Annotation
 
 
@@ -129,6 +166,7 @@ class SelectionInput(Model):
     annotation_overrides: dict[str, Annotation] = Field(default_factory=dict, max_length=MAX_REFERENCES)
     rejection_notes: Text = ""
     expected_version: int = Field(ge=0)
+    rejected_ids: list[str] = Field(default_factory=list, max_length=MAX_REFERENCES)
 
     @field_validator("ordered_ids")
     @classmethod
@@ -136,6 +174,14 @@ class SelectionInput(Model):
         if len(value) != len(set(value)):
             raise ValueError("Selection IDs must be unique")
         return value
+
+    @model_validator(mode="after")
+    def distinct_rejections(self):
+        if len(self.rejected_ids) != len(set(self.rejected_ids)) or set(self.rejected_ids) & set(
+            self.ordered_ids
+        ):
+            raise ValueError("Rejected references must be unique and cannot be selected")
+        return self
 
 
 class Selection(SelectionInput):
@@ -157,6 +203,9 @@ class UsageStats(Model):
     output_tokens: int = Field(default=0, ge=0)
     elapsed_seconds: float = Field(default=0, ge=0)
     models: list[str] = Field(default_factory=list, max_length=10)
+    page_checks: int = Field(default=0, ge=0)
+    page_requests: int = Field(default=0, ge=0)
+    accessible_pages: int = Field(default=0, ge=0)
 
 
 class SourceCoverage(Model):
@@ -174,6 +223,7 @@ class SearchOutcome(Model):
     coverage: list[SourceCoverage] = Field(default_factory=list, max_length=7)
     partial: bool = False
     error_code: str | None = None
+    page_checks: list[PageCheck] = Field(default_factory=list, max_length=60)
 
 
 class DiscoveredReference(Model):
@@ -186,6 +236,7 @@ class DiscoveredReference(Model):
     tags: list[Annotated[str, Field(max_length=100)]] = Field(max_length=10)
     strand: str = Field(max_length=120)
     annotation: Annotation
+    assessment: CreativeAssessment | None = None
 
 
 class DiscoveryDraft(Model):
@@ -205,6 +256,7 @@ class SearchRun(Model):
     error_code: str | None = None
     usage: UsageStats = Field(default_factory=UsageStats)
     coverage: list[SourceCoverage] = Field(default_factory=list, max_length=7)
+    page_checks: list[PageCheck] = Field(default_factory=list, max_length=60)
     selection: Selection | None = None
     created_at: datetime = Field(default_factory=now)
     updated_at: datetime = Field(default_factory=now)

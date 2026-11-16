@@ -1,21 +1,50 @@
 import ipaddress
 import json
 from dataclasses import dataclass
-from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+from urllib.parse import unquote_plus, urlsplit, urlunsplit
+
+from pydantic import HttpUrl, TypeAdapter
 
 from backend.core.config import ROOT
 from backend.schemas.models import SearchStrategy, Source
 
+URL_ADAPTER = TypeAdapter(HttpUrl)
+
+
+def public_address(address) -> bool:
+    if not address.is_global or any(
+        [
+            address.is_reserved,
+            address.is_multicast,
+            address.is_loopback,
+            address.is_link_local,
+            address.is_unspecified,
+        ]
+    ):
+        return False
+    if isinstance(address, ipaddress.IPv6Address):
+        if address.ipv4_mapped:
+            return public_address(address.ipv4_mapped)
+        if address.sixtofour or address.teredo:
+            return False
+        if address in ipaddress.ip_network("64:ff9b:1::/48"):
+            return False
+        if address in ipaddress.ip_network("64:ff9b::/96"):
+            return public_address(ipaddress.IPv4Address(int(address) & 0xFFFFFFFF))
+    return True
+
 
 def canonical_url(value: str) -> str | None:
     try:
-        parts = urlsplit(value)
+        if any(ord(char) < 32 or ord(char) == 127 for char in value):
+            return None
+        parts = urlsplit(str(URL_ADAPTER.validate_python(value)))
         host = (parts.hostname or "").lower().rstrip(".")
         if parts.scheme not in {"http", "https"} or not host or parts.username or parts.password:
             return None
         if any(char.isspace() for char in host):
             return None
-        if host in {"localhost", "example.invalid"} or host.endswith((".localhost", ".local", ".invalid")):
+        if host == "localhost" or host.endswith((".localhost", ".local", ".invalid", ".internal", ".lan")):
             return None
         try:
             address = ipaddress.ip_address(host)
@@ -23,19 +52,23 @@ def canonical_url(value: str) -> str | None:
             if "." not in host or host.replace(".", "").isdigit():
                 return None
         else:
-            if not address.is_global:
+            if not public_address(address):
                 return None
         # Preserve access hashes and work-identifying parameters such as v and h.
         query = [
-            (key, value)
-            for key, value in parse_qsl(parts.query, keep_blank_values=True)
-            if not key.lower().startswith("utm_") and key.lower() not in {"fbclid", "gclid"}
+            part
+            for part in parts.query.split("&")
+            if part
+            and not (
+                unquote_plus(part.split("=", 1)[0]).lower().startswith("utm_")
+                or unquote_plus(part.split("=", 1)[0]).lower() in {"fbclid", "gclid"}
+            )
         ]
         port = parts.port
         netloc = f"[{host}]" if ":" in host else host
-        if port and port not in {80, 443}:
+        if port and (parts.scheme, port) not in {("http", 80), ("https", 443)}:
             netloc += f":{port}"
-        return urlunsplit((parts.scheme.lower(), netloc, parts.path or "/", urlencode(query), ""))
+        return urlunsplit((parts.scheme.lower(), netloc, parts.path or "/", "&".join(query), ""))
     except (ValueError, TypeError):
         return None
 

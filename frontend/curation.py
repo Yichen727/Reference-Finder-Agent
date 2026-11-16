@@ -21,6 +21,7 @@ def draft_from_run(run: dict) -> dict:
         },
         "expected_version": selection.get("version", 0),
         "rejection_notes": selection.get("rejection_notes", ""),
+        "rejected_ids": list(selection.get("rejected_ids", [])),
         "revision": 0,
     }
 
@@ -33,4 +34,5 @@ def selection_payload(draft: dict) -> dict:
         },
         "expected_version": draft["expected_version"],
         "rejection_notes": draft["rejection_notes"],
+        "rejected_ids": list(draft.get("rejected_ids", [])),
     }

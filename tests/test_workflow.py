@@ -98,6 +98,13 @@ def test_invalid_selection_conflicts_and_empty_export(client):
     assert client.post(f"/search-runs/{run['id']}/exports/docx").status_code == 422
     for ids in [[item["id"], item["id"]], [other["results"][0]["id"]], [str(uuid4())] * 16]:
         assert client.put(url, json={"ordered_ids": ids, "expected_version": 0}).status_code == 422
+    for rejected in [[other["results"][0]["id"]], [item["id"], item["id"]]]:
+        assert (
+            client.put(
+                url, json={"ordered_ids": [], "rejected_ids": rejected, "expected_version": 0}
+            ).status_code
+            == 422
+        )
     bad_override = {
         "ordered_ids": [],
         "annotation_overrides": {item["id"]: item["annotation"]},

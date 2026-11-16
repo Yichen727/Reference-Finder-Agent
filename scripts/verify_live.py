@@ -49,8 +49,19 @@ def main():
         f"Status: {run.status}; references: {len(run.results)}; search calls: {run.usage.web_search_calls}.",
         flush=True,
     )
+    print(
+        f"Page checks: {run.usage.page_checks}; HTTP attempts: {run.usage.page_requests}; "
+        f"readable pages: {run.usage.accessible_pages}.",
+        flush=True,
+    )
     for item in run.results:
         print(f"- {item.title} | {item.platform} | {item.source_url}", flush=True)
+        if item.ranking:
+            print(
+                f"  Evidence: {item.verification_status}; fit: {item.ranking.score}; "
+                f"merged source records: {item.merged_count}.",
+                flush=True,
+            )
     if not run.results:
         for warning in run.warnings:
             print(warning, flush=True)

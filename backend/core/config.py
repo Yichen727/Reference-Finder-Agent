@@ -24,6 +24,13 @@ class Settings(BaseSettings):
     search_timeout_seconds: float = Field(default=75, ge=1, le=120)
     search_run_timeout_seconds: float = Field(default=240, ge=10, le=600)
     search_retry_count: int = Field(default=1, ge=0, le=2)
+    verification_max_pages: int = Field(default=18, ge=1, le=30)
+    verification_max_requests: int = Field(default=60, ge=2, le=120)
+    verification_workers: int = Field(default=4, ge=1, le=6)
+    verification_timeout_seconds: float = Field(default=8, ge=1, le=20)
+    verification_total_seconds: float = Field(default=45, ge=1, le=90)
+    verification_max_bytes: int = Field(default=1000000, ge=10000, le=2000000)
+    verification_max_redirects: int = Field(default=3, ge=0, le=5)
 
     @field_validator("openai_model", "openai_search_model", mode="before")
     @classmethod

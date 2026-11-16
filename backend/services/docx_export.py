@@ -67,7 +67,7 @@ def render_docx(path: Path, brief: StoredBrief, run: SearchRun):
         for item in run.coverage:
             doc.add_paragraph(
                 f"{item.category}: {item.queries_attempted} query groups, "
-                f"{item.references_returned} selected recommendations. {item.note}"
+                f"{item.references_returned} recommended works. {item.note}"
             )
     by_id = {item.id: item for item in run.results}
     doc.add_heading("Selected references", level=1)
@@ -97,6 +97,16 @@ def render_docx(path: Path, brief: StoredBrief, run: SearchRun):
             doc.add_heading(label, level=2)
             doc.add_paragraph(value or "Not provided")
         doc.add_paragraph(f"Evidence: {item.verification_status} / Confidence: {annotation.confidence}")
+        if item.page_check:
+            doc.add_paragraph(f"Page check: {item.page_check.status}. {item.page_check.reason}")
+        if item.ranking:
+            doc.add_paragraph(
+                f"Recommendation fit: {item.ranking.score:.0f}/100. {item.ranking.selection_note}"
+            )
+            for reason in item.ranking.reasons:
+                doc.add_paragraph(reason)
+        for alternate in item.alternate_urls:
+            add_hyperlink(doc.add_paragraph(), "Alternate source", str(alternate))
         for assumption in annotation.assumptions:
             doc.add_paragraph(f"Assumption: {assumption}")
         for evidence in run.evidence:

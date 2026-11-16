@@ -12,6 +12,7 @@ from backend.providers.openai_errors import safe_openai_errors
 from backend.schemas.models import (
     DiscoveryDraft,
     Evidence,
+    PageCheck,
     ReferenceItem,
     SearchOutcome,
     SearchStrategy,
@@ -20,6 +21,8 @@ from backend.schemas.models import (
     UsageStats,
     new_id,
 )
+from backend.services.page_verification import PageVerifier
+from backend.services.ranking import diverse_shortlist, merge_works, score_reference
 from backend.services.source_policy import SearchJob, SourcePolicy, canonical_url
 
 
@@ -76,6 +79,8 @@ class SourceNote:
     evidence: Evidence
     categories: list[str]
     strand: str
+    page: PageCheck | None = None
+    page_evidence: Evidence | None = None
 
 
 def citation_excerpt(text: str, index: int) -> str:
@@ -159,6 +164,22 @@ def source_notes(response, job: SearchJob) -> list[SourceNote]:
 
 def normalized_words(value: str) -> str:
     return re.sub(r"[^a-z0-9]+", " ", value.casefold()).strip()
+
+
+def supported_description(description: str, source: str) -> bool:
+    # Reject new numeric facts or award claims absent from the supplied source text.
+    def numbers(text):
+        return set(re.findall(r"\b\d+(?:[.,]\d+)*%?", text.replace(",", "")))
+
+    if not numbers(description) <= numbers(source):
+        return False
+    award_terms = {"cannes", "bafta", "grierson", "d&ad", "lovie", "shorty", "oscar"}
+    if any(term in description.casefold() and term not in source.casefold() for term in award_terms):
+        return False
+    if re.search(r"\b(?:award.winning|won (?:gold|silver|bronze))\b", description, re.I):
+        if not re.search(r"\b(?:award|winner|won|gold|silver|bronze)\b", source, re.I):
+            return False
+    return True
 
 
 class ExternalDiscovery:
@@ -273,14 +294,42 @@ class ExternalDiscovery:
                         if budget.usage.requests_attempted > before_attempts:
                             for category in job.categories:
                                 coverage[category].queries_attempted += 1
-                outcome.evidence = [note.evidence for note in notes.values()]
+                if progress:
+                    progress("checking_public_pages")
+                verifier = PageVerifier(self.settings)
+                checks = verifier.check_many(
+                    list(notes),
+                    deadline=budget.started + self.settings.search_run_timeout_seconds - 15,
+                )
+                budget.usage.page_requests = verifier.requests
+                budget.usage.page_checks = verifier.checked
+                budget.usage.accessible_pages = sum(check.status == "accessible" for check in checks.values())
+                outcome.page_checks = [check.model_copy(update={"text": ""}) for check in checks.values()]
+                for url, note in notes.items():
+                    note.page = checks.get(url)
+                    if note.page and note.page.status == "accessible" and note.page.work_page:
+                        note.page_evidence = Evidence(
+                            source_url=note.page.final_url or note.evidence.source_url,
+                            page_title=note.page.title or note.evidence.page_title,
+                            excerpt=note.page.text,
+                            retrieved_at=note.page.checked_at,
+                            access_status="accessible",
+                            evidence_type="page_text",
+                        )
+                outcome.evidence = [note.evidence for note in notes.values()] + [
+                    note.page_evidence for note in notes.values() if note.page_evidence
+                ]
                 described = [
-                    note for note in notes.values() if note.evidence.evidence_type == "search_summary"
+                    note
+                    for note in notes.values()
+                    if (note.evidence.evidence_type == "search_summary" or note.page_evidence)
+                    and (not note.page or note.page.status not in {"blocked", "unreachable"})
+                    and (not note.page or note.page.status != "accessible" or note.page.work_page)
                 ]
                 if not described:
                     outcome.error_code = last_error.code if last_error else "no_search_evidence"
                     outcome.warnings.append(
-                        "No cited individual-work evidence was available. Try different queries or sources."
+                        "No usable work evidence remained after source checks. Try other queries or sources."
                     )
                     return outcome
                 if progress:
@@ -288,12 +337,18 @@ class ExternalDiscovery:
                 context = {
                     "brief": brief.model_dump(exclude={"id", "created_at"}),
                     "strategy": strategy.model_dump(),
+                    "candidate_limit": min(15, max(8, brief.requested_count * 2)),
                     "sources": [
                         {
-                            "id": note.evidence.id,
-                            "title": note.evidence.page_title,
-                            "url": str(note.evidence.source_url),
+                            "id": (note.page_evidence or note.evidence).id,
+                            "title": (note.page_evidence or note.evidence).page_title,
+                            "url": str((note.page_evidence or note.evidence).source_url),
                             "search_summary": note.evidence.excerpt,
+                            "search_evidence_id": note.evidence.id,
+                            "page_text": note.page_evidence.excerpt if note.page_evidence else "",
+                            "page_check": note.page.model_dump(mode="json", exclude={"text"})
+                            if note.page
+                            else None,
                             "source_categories": note.categories,
                             "strand": note.strand,
                         }
@@ -307,7 +362,7 @@ class ExternalDiscovery:
                             instructions=(ROOT / "prompts/discovery.txt").read_text(encoding="utf-8"),
                             input=json.dumps(context),
                             text_format=DiscoveryDraft,
-                            max_output_tokens=min(11000, 1400 + brief.requested_count * 650),
+                            max_output_tokens=min(12500, 1400 + context["candidate_limit"] * 700),
                             store=False,
                             **kwargs,
                         ),
@@ -320,6 +375,27 @@ class ExternalDiscovery:
                         502,
                     )
                 self.build_results(outcome, response.output_parsed, notes, brief, strategy)
+                if progress:
+                    progress("ranking_and_deduplicating")
+                eligible = [
+                    item for item in outcome.results if score_reference(item, brief, set(item.evidence_ids))
+                ]
+                merged = merge_works(eligible)
+                if len(merged) < len(eligible):
+                    outcome.warnings.append(
+                        f"Merged {len(eligible) - len(merged)} duplicate works; alternate links are kept."
+                    )
+                outcome.results = diverse_shortlist(
+                    merged, min(brief.requested_count, self.settings.max_references)
+                )
+                if len(eligible) < len(response.output_parsed.references):
+                    outcome.warnings.append(
+                        "Excluded proposed works lacking relevance, specificity or matching evidence."
+                    )
+                for category in outcome.coverage:
+                    category.references_returned = sum(
+                        item.platform == category.category for item in outcome.results
+                    )
         except AppError as error:
             outcome.error_code = error.code
             outcome.partial = True
@@ -328,6 +404,11 @@ class ExternalDiscovery:
             outcome.usage = budget.finish()
         if outcome.results:
             outcome.error_code = None
+            if any(item.verification_status != "supported" for item in outcome.results):
+                outcome.partial = True
+                outcome.warnings.append(
+                    "Some references use search evidence because their original pages could not be checked."
+                )
             if len(outcome.results) < brief.requested_count:
                 outcome.partial = True
                 outcome.warnings.append(
@@ -336,8 +417,8 @@ class ExternalDiscovery:
         else:
             outcome.error_code = outcome.error_code or "no_eligible_references"
         outcome.warnings.append(
-            "Search citations identify discovery evidence. Original pages, videos, credits "
-            "and usage rights have not been independently verified."
+            "Page checks cover readable source text and work identity. They do not establish video analysis, "
+            "complete production details or permission to reproduce images and videos."
         )
         for item in outcome.coverage:
             if item.queries_attempted == 0:
@@ -346,31 +427,50 @@ class ExternalDiscovery:
         return outcome
 
     def build_results(self, outcome, draft, notes, brief, strategy):
-        by_id = {note.evidence.id: note for note in notes.values()}
-        seen_urls, seen_works = set(), set()
+        by_id = {
+            evidence.id: note
+            for note in notes.values()
+            for evidence in [note.evidence, note.page_evidence]
+            if evidence
+        }
         discarded = 0
-        limit = min(brief.requested_count, self.settings.max_references)
         for candidate in draft.references:
             primary = by_id.get(candidate.primary_evidence_id)
-            if primary is None or primary.evidence.evidence_type != "search_summary":
+            if primary is None or (
+                not primary.page_evidence and primary.evidence.evidence_type != "search_summary"
+            ):
                 discarded += 1
                 continue
-            evidence = primary.evidence
+            if primary.page and primary.page.status in {"blocked", "unreachable"}:
+                discarded += 1
+                continue
+            if primary.page and primary.page.status == "accessible" and not primary.page.work_page:
+                discarded += 1
+                continue
+            evidence = primary.page_evidence or primary.evidence
             title = normalized_words(candidate.title)
             supporting_text = normalized_words(evidence.page_title + " " + evidence.excerpt)
             url = str(evidence.source_url)
             category = self.policy.category(url, candidate.platform, strategy.preferred_sources)
+            if primary.page_evidence and title not in normalized_words(
+                primary.page.title + " " + primary.page.text
+            ):
+                discarded += 1
+                continue
             if not title or title not in supporting_text or category is None:
                 discarded += 1
                 continue
-            creator = candidate.creator if normalized_words(candidate.creator) in supporting_text else ""
-            work_key = title
-            if url in seen_urls or work_key in seen_works:
+            if not supported_description(
+                candidate.annotation.what_it_is, evidence.page_title + " " + evidence.excerpt
+            ):
+                discarded += 1
                 continue
-            seen_urls.add(url)
-            seen_works.add(work_key)
+            creator = candidate.creator if normalized_words(candidate.creator) in supporting_text else ""
             annotation = candidate.annotation.model_copy(deep=True)
-            annotation.confidence = "low"
+            annotation.confidence = "medium" if primary.page_evidence else "low"
+            if not annotation.production_note.lower().startswith("early indication"):
+                annotation.production_note = "Early indication: " + annotation.production_note
+            annotation.production_note = annotation.production_note[:6000]
             annotation.rights_note = (
                 "Link for reference discussion only. Image and video reproduction "
                 "permission has not been established."
@@ -379,15 +479,29 @@ class ExternalDiscovery:
                 dict.fromkeys(
                     annotation.assumptions
                     + [
-                        "Based on cited search summaries; page and video not independently reviewed.",
+                        (
+                            "Source-page text and identity were checked; the video itself was not analysed."
+                            if primary.page_evidence
+                            else "Search evidence only; original page identity still needs review."
+                        ),
                     ]
                 )
             )[:10]
             valid_strands = {strand.name for strand in strategy.strands}
             ids = list(
                 dict.fromkeys(
-                    [evidence.id]
-                    + [item_id for item_id in candidate.supporting_evidence_ids if item_id in by_id]
+                    [evidence.id, primary.evidence.id]
+                    + [
+                        item_id
+                        for item_id in candidate.supporting_evidence_ids
+                        if item_id in by_id
+                        and title
+                        in normalized_words(
+                            (by_id[item_id].page_evidence or by_id[item_id].evidence).excerpt
+                            + " "
+                            + (by_id[item_id].page_evidence or by_id[item_id].evidence).page_title
+                        )
+                    ]
                 )
             )
             outcome.results.append(
@@ -400,14 +514,16 @@ class ExternalDiscovery:
                     tags=candidate.tags,
                     strand=candidate.strand if candidate.strand in valid_strands else primary.strand,
                     evidence_ids=ids,
-                    verification_status="unverified",
+                    verification_status="supported" if primary.page_evidence else "unverified",
                     is_mock=False,
                     annotation=annotation,
+                    assessment=candidate.assessment,
+                    page_check=primary.page.model_copy(update={"text": ""}) if primary.page else None,
+                    alternate_urls=[primary.evidence.source_url]
+                    if str(primary.evidence.source_url) != url
+                    else [],
                 )
             )
-            next(item for item in outcome.coverage if item.category == category).references_returned += 1
-            if len(outcome.results) >= limit:
-                break
         if discarded:
             outcome.warnings.append(
                 f"Excluded {discarded} proposed references without matching titles, sources or evidence IDs."
