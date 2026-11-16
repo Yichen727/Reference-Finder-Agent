@@ -374,7 +374,7 @@ def export_pack(run: dict, draft: dict):
 def selection_panel(run, draft):
     st.subheader(f"Your Pack ({len(draft['ordered_ids'])})", anchor="your-pack")
     by_id = {item["id"]: item for item in run["results"]}
-    st.caption("Drag to reorder")
+    st.caption("Drag a row to reorder")
     key = f"pack_sort_{run['id']}"
     pack_list(
         data={

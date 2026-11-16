@@ -71,8 +71,9 @@ Naming uses no additional OpenAI calls. There is no selectbox or separate Open a
 
 The pack uses a small offline [Streamlit v2 component](https://docs.streamlit.io/develop/concepts/custom-components/components-v2)
 with a drag handle, title and Remove action in each row. No external JavaScript service
-or sorting dependency is required. Drag with a pointer or touch, or focus the handle
-and use Arrow Up/Down. Actions carry unique reference IDs and a draft revision; stale
+or sorting dependency is required. Drag the handle or title row with a pointer or touch,
+or focus the handle and use Arrow Up/Down. Release to commit the order; Escape or a
+cancelled gesture restores the previous order. Actions carry unique reference IDs and a draft revision; stale
 events or invalid permutations cannot silently change the selected set. Duplicate titles
 remain independent. Selection changes invalidate an old export download.
 
@@ -358,7 +359,8 @@ For browser acceptance on Windows with Google Chrome installed:
 ```
 
 This starts hidden Chrome and isolated test services on ports 8100/8601, tests real pointer
-dragging, row removal, duplicate titles, DOCX order, history navigation and desktop/narrow
+continuous dragging from handles and titles, outside release, gesture cancellation,
+touch/keyboard sorting, row removal, duplicate titles, DOCX order, history navigation and desktop/narrow
 layouts, then stops its own processes. It uses labelled test previews and a separate database;
 it makes no OpenAI calls and does not change user research. Screenshots and the report are
 written under Git-ignored `data/ui-review/`. The verified environment provides `websockets`

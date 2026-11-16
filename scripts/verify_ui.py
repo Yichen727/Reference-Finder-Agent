@@ -78,6 +78,70 @@ class CDP:
         result = self.call("Page.captureScreenshot", format="png", captureBeyondViewport=False)
         (ARTIFACTS / name).write_bytes(base64.b64decode(result["data"]))
 
+    def pack_state(self):
+        return self.evaluate(f"""(() => {{
+          const list=({PACK_ROOT})?.querySelector('.pack-list');
+          return list ? {{ids:[...list.children].map(row=>row.dataset.id),
+            revision:Number(list.dataset.revision)}} : null;
+        }})()""")
+
+    def drag_pack(self, source, target, *, selector=".pack-title", cancel=False, touch=False, outside=False):
+        before = self.pack_state()
+        expected = list(before["ids"])
+        item = expected.pop(source)
+        expected.insert(target, item)
+        coordinates = self.evaluate(f"""(() => {{
+          const rows=[...({PACK_ROOT}).querySelectorAll('.pack-row')];
+          const a=rows[{source}].querySelector({json.dumps(selector)}).getBoundingClientRect();
+          const b=rows[{target}].getBoundingClientRect();
+          return {{x:a.x+a.width/2,y:a.y+a.height/2,
+            target:{source} < {target} ? b.bottom-2 : b.top+2}};
+        }})()""")
+        x, y = coordinates["x"], coordinates["y"]
+        if touch:
+            self.call("Emulation.setTouchEmulationEnabled", enabled=True)
+            self.call("Input.dispatchTouchEvent", type="touchStart", touchPoints=[{"x": x, "y": y}])
+        else:
+            self.call("Input.dispatchMouseEvent", type="mouseMoved", x=x, y=y)
+            self.call("Input.dispatchMouseEvent", type="mousePressed", x=x, y=y, button="left", clickCount=1)
+        for step in range(1, 19):
+            position = y + (coordinates["target"] - y) * step / 18
+            if touch:
+                self.call("Input.dispatchTouchEvent", type="touchMove", touchPoints=[{"x": x, "y": position}])
+            else:
+                self.call(
+                    "Input.dispatchMouseEvent", type="mouseMoved", x=x, y=position, button="left", buttons=1
+                )
+            time.sleep(0.03)
+        if cancel:
+            self.call(
+                "Input.dispatchKeyEvent",
+                type="keyDown",
+                key="Escape",
+                code="Escape",
+                windowsVirtualKeyCode=27,
+            )
+            self.call(
+                "Input.dispatchKeyEvent", type="keyUp", key="Escape", code="Escape", windowsVirtualKeyCode=27
+            )
+        if touch:
+            self.call("Input.dispatchTouchEvent", type="touchEnd", touchPoints=[])
+            self.call("Emulation.setTouchEmulationEnabled", enabled=False)
+        else:
+            if outside:
+                x = 10
+                self.call(
+                    "Input.dispatchMouseEvent", type="mouseMoved", x=x, y=position, button="left", buttons=1
+                )
+            self.call(
+                "Input.dispatchMouseEvent", type="mouseReleased", x=x, y=position, button="left", clickCount=1
+            )
+        if cancel:
+            time.sleep(0.25)
+            assert self.pack_state() == before, (before, self.pack_state())
+        else:
+            wait_until(lambda: self.pack_state() == {"ids": expected, "revision": before["revision"] + 1})
+
 
 def seed(config):
     with TestClient(create_app(config)) as client:
@@ -258,38 +322,31 @@ def main():
         assert api_count() == calls, "Details must not request additional API data"
         print("Read-only details and selection: zero additional API requests", flush=True)
 
-        # Use trusted pointer events rather than injecting the Python selection state.
-        coordinates = cdp.evaluate(f"""(() => {{const r=({PACK_ROOT});
-          const rows=[...r.querySelectorAll('.pack-row')];
-          const a=rows[0].querySelector('.drag-handle').getBoundingClientRect();
-          const b=rows[1].getBoundingClientRect();
-          return {{x:a.x+a.width/2,y:a.y+a.height/2,target:b.bottom+5}};}})()""")
-        cdp.call("Input.dispatchMouseEvent", type="mouseMoved", x=coordinates["x"], y=coordinates["y"])
+        # Continuous human-like movement must receive pointerup after rows move in the DOM.
+        cdp.drag_pack(0, 1, selector=".drag-handle")
+        cdp.drag_pack(2, 0)
+        cdp.drag_pack(0, 2, outside=True)
+        cdp.drag_pack(0, 1, cancel=True)
+        cdp.drag_pack(0, 1, touch=True)
+        cdp.drag_pack(1, 0, touch=True)
+        before_keyboard = cdp.pack_state()
+        cdp.evaluate(f"({PACK_ROOT}).querySelector('.drag-handle').focus()")
         cdp.call(
-            "Input.dispatchMouseEvent",
-            type="mousePressed",
-            x=coordinates["x"],
-            y=coordinates["y"],
-            button="left",
-            clickCount=1,
+            "Input.dispatchKeyEvent",
+            type="keyDown",
+            key="ArrowDown",
+            code="ArrowDown",
+            windowsVirtualKeyCode=40,
         )
         cdp.call(
-            "Input.dispatchMouseEvent",
-            type="mouseMoved",
-            x=coordinates["x"],
-            y=coordinates["target"],
-            button="left",
-            buttons=1,
+            "Input.dispatchKeyEvent",
+            type="keyUp",
+            key="ArrowDown",
+            code="ArrowDown",
+            windowsVirtualKeyCode=40,
         )
-        cdp.call(
-            "Input.dispatchMouseEvent",
-            type="mouseReleased",
-            x=coordinates["x"],
-            y=coordinates["target"],
-            button="left",
-            clickCount=1,
-        )
-        time.sleep(0.8)
+        wait_until(lambda: cdp.pack_state()["revision"] == before_keyboard["revision"] + 1)
+        cdp.drag_pack(1, 0)
         displayed = cdp.evaluate(f"[...({PACK_ROOT}).querySelectorAll('.pack-row')].map(e=>e.dataset.id)")
         assert displayed == [run.results[2].id, run.results[1].id, run.results[0].id], displayed
         cdp.screenshot("pack-reordered.png")
@@ -312,7 +369,11 @@ def main():
         document = Document(config.data_dir / "exports" / export["filename"])
         text = "\n".join(paragraph.text for paragraph in document.paragraphs)
         assert text.index("Identifiable fixture analysis 1") < text.index("Identifiable fixture analysis 0")
-        print("Pointer drag, duplicate titles, row removal and exact export order passed", flush=True)
+        print(
+            "Continuous handle/title dragging, outside release, cancellation, touch and keyboard passed",
+            flush=True,
+        )
+        print("Duplicate titles, row removal and exact DOCX export order passed", flush=True)
         samples = {}
         for width in [1200, 1024, 768, 390]:
             cdp.call(
