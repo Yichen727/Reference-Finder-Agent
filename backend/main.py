@@ -15,6 +15,7 @@ from backend.schemas.models import (
     ExportRecord,
     ExportRequest,
     ReferenceBrief,
+    ResearchTitleInput,
     SearchRequest,
     SearchRun,
     SearchStrategy,
@@ -172,6 +173,18 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     def get_run(run_id: UUID):
         return workflow.run(str(run_id))
 
+    @app.patch("/search-runs/{run_id}/title")
+    def rename_research(run_id: UUID, value: ResearchTitleInput):
+        with workflow.edit_lock:
+            presentation.rename(str(run_id), value.title)
+        return {"id": str(run_id), "title": value.title}
+
+    @app.delete("/search-runs/{run_id}")
+    def delete_research(run_id: UUID):
+        with workflow.edit_lock:
+            repo.delete_research(str(run_id))
+        return {"id": str(run_id), "deleted": True}
+
     @app.get("/search-runs/{run_id}/presentation")
     def run_presentation(run_id: UUID):
         run = workflow.run(str(run_id))
@@ -189,6 +202,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.get("/exports/{export_id}/download")
     def download_export(export_id: UUID):
         record = ExportRecord.model_validate(repo.get("export", str(export_id)))
+        repo.get("run", record.run_id)
         path = config.data_dir / "exports" / record.filename
         if not path.is_file():
             raise AppError("export_missing", "Export file is missing; generate it again.", 404)

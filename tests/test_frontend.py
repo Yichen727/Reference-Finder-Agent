@@ -30,6 +30,10 @@ def bridge(client, monkeypatch):
 
     def request(self, method, path, payload=None, *, binary=False):
         state["requests"].append((method, path, copy.deepcopy(payload)))
+        if (method == "DELETE" and state.get("fail_delete")) or (
+            method == "PATCH" and state.get("fail_rename")
+        ):
+            raise APIError("Research management is unavailable.", status=503)
         if method == "POST" and path.endswith("/exports/docx"):
             if state["fail_export"]:
                 state["fail_export"] = False
@@ -73,7 +77,17 @@ def launch(app, concept="A warm film about a shared future", *, count=3):
 
 
 def pick(app, run, index):
-    widget(app.checkbox, f"pick_{run['id']}_{run['results'][index]['id']}").check().run()
+    widget(app.button, f"pick_action_{run['id']}_{run['results'][index]['id']}").click().run()
+
+
+def selected(app, run, index):
+    return (
+        widget(app.button, f"pick_action_{run['id']}_{run['results'][index]['id']}").proto.type == "primary"
+    )
+
+
+def card_count(app):
+    return sum((item.key or "").startswith("pick_action_") for item in app.button)
 
 
 def details(app, item):
@@ -158,14 +172,14 @@ def test_remove_and_navigation_preserve_unsaved_annotation_drafts(bridge):
     pick(app, run, 1)
     edit_borrow(app, run, first, "Keep this draft across navigation")
     details(app, second)
-    button(app, "Remove from Pack").click().run()
+    widget(app.button, f"detail_select_{second['id']}").click().run()
     button(app, "Done").click().run()
-    assert not widget(app.checkbox, f"pick_{run['id']}_{second['id']}").value
+    assert not selected(app, run, 1)
     button(app, "New Research").click().run()
     launch(app, concept="A different idea")
     widget(app.button, f"research_{run['id']}").click().run()
     assert app.session_state["run_id"] == run["id"]
-    assert widget(app.checkbox, f"pick_{run['id']}_{first['id']}").value
+    assert selected(app, run, 0)
     details(app, first)
     assert any(item.value == "Keep this draft across navigation" for item in app.markdown)
     assert not app.text_area
@@ -252,7 +266,7 @@ def test_saved_run_url_restores_the_exported_selection(bridge):
     restored.query_params["run"] = run["id"]
     restored.run()
     assert not restored.exception
-    assert widget(restored.checkbox, f"pick_{run['id']}_{run['results'][0]['id']}").value
+    assert selected(restored, run, 0)
 
 
 def test_filters_preserve_hidden_selections_and_annotation_edits(bridge, client):
@@ -269,15 +283,15 @@ def test_filters_preserve_hidden_selections_and_annotation_edits(bridge, client)
     pick(restored, record, 0)
     edit_borrow(restored, record, first, "Preserve this annotation through filters")
     widget(restored.multiselect, f"source_filter_{run.id}").set_value(["YouTube"]).run()
-    assert len(restored.checkbox) == 1
+    assert card_count(restored) == 1
     assert first["id"] in restored.session_state["pack_drafts"][run.id]["ordered_ids"]
     widget(restored.multiselect, f"source_filter_{run.id}").set_value([]).run()
-    assert widget(restored.checkbox, f"pick_{run.id}_{first['id']}").value
+    assert selected(restored, record, 0)
     details(restored, first)
     assert any(item.value == "Preserve this annotation through filters" for item in restored.markdown)
     button(restored, "Done").click().run()
     widget(restored.multiselect, f"strand_filter_{run.id}").set_value(["Execution"]).run()
-    assert len(restored.checkbox) == 1
+    assert card_count(restored) == 1
     assert first["id"] in restored.session_state["pack_drafts"][run.id]["ordered_ids"]
 
 
@@ -289,14 +303,14 @@ def test_exclusions_are_saved_with_the_pack_and_can_be_restored(bridge, client):
     pick(app, run, 1)
     details(app, second)
     widget(app.button, f"exclude_{second['id']}").click().run()
-    assert len(app.checkbox) == 2
+    assert card_count(app) == 2
     assert second["id"] not in app.session_state["pack_drafts"][run["id"]]["ordered_ids"]
     button(app, "Export Reference Pack").click().run()
     saved = client.get(f"/search-runs/{run['id']}").json()["selection"]
     assert saved["ordered_ids"] == [first["id"]] and saved["rejected_ids"] == [second["id"]]
     button(app, "Restore Excluded References").click().run()
-    assert len(app.checkbox) == 3
-    assert not widget(app.checkbox, f"pick_{run['id']}_{second['id']}").value
+    assert card_count(app) == 3
+    assert not selected(app, run, 1)
 
 
 def test_only_backend_validated_preview_bytes_are_rendered(bridge, client):
@@ -352,7 +366,7 @@ def test_details_are_read_only_and_open_without_any_api_calls(bridge):
         assert any(item.value == f"**{label}**" for item in app.markdown)
     evidence = next(item for item in app.expander if item.label == "Source Evidence, Verification and Rights")
     assert not evidence.proto.expanded
-    button(app, "Add to Pack").click().run()
+    widget(app.button, f"detail_select_{first['id']}").click().run()
     assert first["id"] in app.session_state["pack_drafts"][run["id"]]["ordered_ids"]
     assert bridge["requests"] == calls
     button(app, "Done").click().run()
@@ -389,3 +403,121 @@ def test_sidebar_research_navigation_preserves_previous_drafts_and_retry_key(bri
         draft["annotations"][original["results"][0]["id"]]["what_to_borrow"]
         == "Keep the first research draft"
     )
+
+
+def assert_header(app):
+    assert [item.value for item in app.title] == ["Reference Finder"]
+    assert (
+        sum(item.value == "Turn your creative idea into a curated reference pack." for item in app.markdown)
+        == 1
+    )
+
+
+def test_header_persists_on_home_active_saved_and_progress_screens(bridge, client):
+    app = open_app()
+    assert_header(app)
+    launch(app)
+    assert_header(app)
+    run = app.session_state["run"]
+    restored = AppTest.from_file(str(APP), default_timeout=15)
+    restored.query_params["run"] = run["id"]
+    restored.run()
+    assert_header(restored)
+    record = SearchRun.model_validate(run)
+    record.status = "running"
+    client.app.state.workflow.repository.put("run", record)
+    restored.session_state["run"] = record.model_dump(mode="json")
+    restored.run()
+    assert_header(restored)
+    assert any("Finding references" in item.value for item in restored.info)
+
+
+def test_icon_selection_toggles_without_duplicates_or_annotation_changes(bridge):
+    app = launch(open_app())
+    run = app.session_state["run"]
+    before = copy.deepcopy(app.session_state["pack_drafts"][run["id"]]["annotations"])
+    assert not app.checkbox
+    pick(app, run, 0)
+    assert selected(app, run, 0)
+    assert app.session_state["pack_drafts"][run["id"]]["ordered_ids"] == [run["results"][0]["id"]]
+    pick(app, run, 0)
+    assert not selected(app, run, 0)
+    assert app.session_state["pack_drafts"][run["id"]]["ordered_ids"] == []
+    pick(app, run, 0)
+    assert app.session_state["pack_drafts"][run["id"]]["ordered_ids"] == [run["results"][0]["id"]]
+    assert app.session_state["pack_drafts"][run["id"]]["annotations"] == before
+
+
+def test_sidebar_rename_updates_immediately_and_preserves_current_pack(bridge, client):
+    app = launch(open_app())
+    run = app.session_state["run"]
+    pick(app, run, 0)
+    before = copy.deepcopy(app.session_state["pack_drafts"][run["id"]])
+    widget(app.button, f"rename_{run['id']}").click().run()
+    widget(app.text_input, f"rename_title_{run['id']}").input("A Manually Named Research").run()
+    button(app, "Save Title").click().run()
+    assert not app.exception
+    assert widget(app.button, f"research_{run['id']}").label == "A Manually Named Research"
+    assert client.get("/search-runs").json()[0]["title"] == "A Manually Named Research"
+    assert app.session_state["pack_drafts"][run["id"]] == before
+    assert app.session_state["run_id"] == run["id"]
+
+
+def test_deleting_active_research_requires_confirmation_and_returns_home(bridge, client):
+    app = launch(open_app())
+    run = app.session_state["run"]
+    pick(app, run, 0)
+    button(app, "Export Reference Pack").click().run()
+    widget(app.button, f"delete_{run['id']}").click().run()
+    assert client.get(f"/search-runs/{run['id']}").status_code == 200
+    assert not any(method == "DELETE" for method, _, _ in bridge["requests"])
+    button(app, "Cancel").click().run()
+    assert selected(app, run, 0)
+    widget(app.button, f"delete_{run['id']}").click().run()
+    button(app, "Delete Research").click().run()
+    assert not app.exception
+    assert client.get(f"/search-runs/{run['id']}").status_code == 404
+    assert "run_id" not in app.session_state
+    assert not app.query_params
+    assert run["id"] not in app.session_state["pack_drafts"]
+    assert run["id"] not in app.session_state["pack_downloads"]
+    assert not any(item.key == f"research_{run['id']}" for item in app.button)
+    assert area(app, "Describe your creative idea")
+    assert_header(app)
+
+
+def test_deleting_another_research_preserves_active_draft(bridge, client):
+    app = launch(open_app())
+    old = app.session_state["run"]
+    button(app, "New Research").click().run()
+    launch(app, concept="Another creative idea")
+    active = app.session_state["run"]
+    pick(app, active, 1)
+    before = copy.deepcopy(app.session_state["pack_drafts"][active["id"]])
+    widget(app.button, f"delete_{old['id']}").click().run()
+    button(app, "Delete Research").click().run()
+    assert not app.exception
+    assert app.session_state["run_id"] == active["id"]
+    assert app.session_state["pack_drafts"][active["id"]] == before
+    assert client.get(f"/search-runs/{old['id']}").status_code == 404
+
+
+@pytest.mark.parametrize("operation", ["rename", "delete"])
+def test_management_failure_preserves_current_research_and_unsaved_pack(bridge, client, operation):
+    app = launch(open_app())
+    run = app.session_state["run"]
+    pick(app, run, 0)
+    before = copy.deepcopy(app.session_state["pack_drafts"][run["id"]])
+    bridge[f"fail_{operation}"] = True
+    widget(app.button, f"{operation}_{run['id']}").click().run()
+    if operation == "rename":
+        widget(app.text_input, f"rename_title_{run['id']}").input("Keep the current research")
+        button(app, "Save Title").click().run()
+    else:
+        button(app, "Delete Research").click().run()
+    assert not app.exception and app.error
+    assert app.session_state["run_id"] == run["id"]
+    assert app.session_state["pack_drafts"][run["id"]] == before
+    assert client.get(f"/search-runs/{run['id']}").status_code == 200
+    button(app, "Cancel").click().run()
+    assert not app.exception and selected(app, run, 0)

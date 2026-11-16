@@ -8,7 +8,7 @@ The workspace provides real external reference discovery:
 1. Describe your creative idea and click **Find References**.
 2. The app generates a strategy and starts searching automatically.
 3. Browse up to 15 visual references in the centre and open **View Details** for the existing analysis.
-4. Choose **Add to Pack**, drag selected items into order, or remove a reference with its row's **×** button.
+4. Click **+** to add a reference, drag selected items into order, or remove one with its row's **×** button.
 5. Click **Export Reference Pack** to save the latest edits and prepare a DOCX download.
 
 Search uses OpenAI Web Search. It records source citations, coverage, timestamps and
@@ -20,6 +20,9 @@ Archived demonstration records remain readable for compatibility, are hidden fro
 Research, and cannot be reused or exported as real references.
 
 ## Interface
+
+Every screen displays **Reference Finder** and **Turn your creative idea into a curated
+reference pack.** at the top of the main content, including progress and restored research.
 
 The home screen contains an idea field and one primary search action. **Advanced Options**
 contains only **Sources**, **Reference Count** and **Creative Constraints**. The existing
@@ -33,8 +36,10 @@ when long. At viewport widths of 1100px or less, panels stack with a **View Your
 shortcut; cards also stack on phone-sized screens. Start another search with **New Research**
 in the sidebar. Earlier research drafts remain available when navigating back to those records.
 
-Cards show the work title, source, creative strand, a short **What to Borrow**, **View Original**
-and **Add to Pack**. The summary contains at most two sentences. **View Details** opens a
+Cards show the work title, source, creative strand and a short **What to Borrow**.
+The three equal-width actions are **View Details**, **Link ↗**, and **+**. The plus changes
+to a highlighted checkmark when selected; clicking again removes it. Both states retain
+accessible Add/Remove labels and tooltips. The summary contains at most two sentences. **View Details** opens a
 read-only report: **What It Is**, **What to Borrow**, **Why It Fits Your Brief**, and
 **Production Considerations**. It shows the preview, title, creator and source, with
 **View Original** and **Add to Pack / Remove from Pack** actions. Source evidence,
@@ -68,6 +73,16 @@ The sidebar contains **New Research** and a clickable **Recent Research** list. 
 active record is highlighted. A 3–6 word extractive title is generated from the original
 prompt once and stored separately from the research record, including for older records.
 Naming uses no additional OpenAI calls. There is no selectbox or separate Open action.
+Each title has a **...** menu. **Rename** saves a title of 1–100 characters directly to
+SQLite without regenerating analysis or changing the original prompt, results or pack.
+**Delete** opens a confirmation dialog. Confirming soft-deletes the research and removes
+it from Recent Research; deleting the active record returns to New Research. Cancel and
+failed requests preserve the current draft. Running searches must finish before deletion.
+
+Soft deletion retains the underlying record, selection and DOCX files for safe recovery;
+it does not remove files from disk. The run URL, presentation, selection/export operations
+and associated export download URLs become unavailable. Other research and exports remain
+accessible. Reusing a deleted run's submission key cannot recreate it.
 
 The pack uses a small offline [Streamlit v2 component](https://docs.streamlit.io/develop/concepts/custom-components/components-v2)
 with a drag handle, title and Remove action in each row. No external JavaScript service
@@ -324,6 +339,8 @@ are later phases.
 | GET | `/search-runs` | List the 30 most recent runs |
 | GET | `/search-runs/{id}` | Read status, results, evidence and saved selection |
 | GET | `/search-runs/{id}/presentation` | Persisted title and cached, validated previews; no AI calls |
+| PATCH | `/search-runs/{id}/title` | Rename using `{"title": "..."}`; no AI request |
+| DELETE | `/search-runs/{id}` | Soft-delete a finished record and revoke access; safe to retry |
 | PUT | `/search-runs/{id}/selection` | Save order and annotations with version checks |
 | POST | `/search-runs/{id}/exports/docx` | Export the saved selection; optional expected-version check |
 | GET | `/exports/{id}/download` | Download a generated DOCX |
@@ -361,7 +378,8 @@ For browser acceptance on Windows with Google Chrome installed:
 This starts hidden Chrome and isolated test services on ports 8100/8601, tests real pointer
 continuous dragging from handles and titles, outside release, gesture cancellation,
 touch/keyboard sorting, row removal, duplicate titles, DOCX order, history navigation and desktop/narrow
-layouts, then stops its own processes. It uses labelled test previews and a separate database;
+layouts, equal card action alignment, icon selection, persistent headers, renaming and confirmed
+deletion, then stops its own processes. It uses labelled test previews and a separate database;
 it makes no OpenAI calls and does not change user research. Screenshots and the report are
 written under Git-ignored `data/ui-review/`. The verified environment provides `websockets`
 through Streamlit's locked dependencies.

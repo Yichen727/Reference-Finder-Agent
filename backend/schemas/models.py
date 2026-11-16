@@ -38,6 +38,10 @@ class Model(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
 
+class ResearchTitleInput(Model):
+    title: str = Field(min_length=1, max_length=100)
+
+
 class ReferenceBrief(Model):
     concept: str = Field(min_length=1, max_length=6000)
     purpose: Text = ""

@@ -71,7 +71,8 @@ class CDP:
 
     def click(self, label, root="document"):
         return self.evaluate(
-            f"[...{root}.querySelectorAll('button')].find(b=>b.innerText.trim()==={json.dumps(label)})?.click()"
+            f"[...{root}.querySelectorAll('button')].find(b=>b.innerText.trim()==={json.dumps(label)}"
+            " && b.getBoundingClientRect().width>0 && !b.disabled)?.click()"
         )
 
     def screenshot(self, name):
@@ -277,7 +278,7 @@ def main():
         wait_until(
             lambda: cdp.evaluate(
                 "!!document.querySelector('.st-key-pack_panel') && "
-                "document.querySelectorAll('[data-testid=stCheckbox]').length===12"
+                "document.querySelectorAll('[class*=st-key-card_select_]').length===12"
             )
         )
         wait_until(lambda: cdp.evaluate(f"!!({PACK_ROOT})?.querySelector('.pack-row')"))
@@ -296,7 +297,25 @@ def main():
         assert abs(desktop["previews"][0]["y"] - desktop["previews"][1]["y"]) < 2, desktop
         assert desktop["previews"][1]["x"] > desktop["previews"][0]["x"]
         assert all(abs(preview["w"] / preview["h"] - 16 / 9) < 0.02 for preview in desktop["previews"])
+        assert cdp.evaluate(
+            "document.querySelectorAll('h1').length===1 && "
+            "document.querySelector('h1').innerText==='Reference Finder'"
+        )
+        actions = cdp.evaluate(f"""[...document.querySelector('.st-key-card_actions_{run.results[0].id}')
+          .querySelectorAll('button,a')].map(e=>e.getBoundingClientRect())
+          .filter(r=>r.width>0).map(r=>({{x:r.x,y:r.y,w:r.width,h:r.height}}))""")
+        assert len(actions) == 3, actions
+        assert max(action["y"] for action in actions) - min(action["y"] for action in actions) < 2, actions
+        assert max(action["w"] for action in actions) - min(action["w"] for action in actions) < 2, actions
+        assert max(action["h"] for action in actions) - min(action["h"] for action in actions) < 2, actions
         cdp.screenshot("desktop.png")
+        # The icon toggles selection through the existing callback, without duplicates.
+        icon = f"document.querySelector('.st-key-card_select_{run.results[3].id} button')"
+        cdp.evaluate(icon + ".click()")
+        wait_until(lambda: cdp.pack_state()["ids"] == [item.id for item in run.results[:4]])
+        assert cdp.evaluate(icon + ".innerText.includes('check')")
+        cdp.evaluate(icon + ".click()")
+        wait_until(lambda: cdp.pack_state()["ids"] == [item.id for item in run.results[:3]])
         calls = api_count()
         cdp.click("View Details")
         wait_until(lambda: cdp.evaluate("!!document.querySelector('[role=dialog]')"))
@@ -398,11 +417,13 @@ def main():
         wait_until(
             lambda: cdp.evaluate(
                 "document.body.innerText.includes('Luxury Automotive Brand Film') && "
-                "document.querySelectorAll('[data-testid=stCheckbox]').length===3"
+                "document.querySelectorAll('[class*=st-key-card_select_]').length===3"
             )
         )
         cdp.click("Human Side of AI")
-        wait_until(lambda: cdp.evaluate("document.querySelectorAll('[data-testid=stCheckbox]').length===12"))
+        wait_until(
+            lambda: cdp.evaluate("document.querySelectorAll('[class*=st-key-card_select_]').length===12")
+        )
         wait_until(
             lambda: (
                 cdp.evaluate(
@@ -411,6 +432,70 @@ def main():
                 )
                 == json.dumps(displayed, separators=(",", ":"))
             )
+        )
+        # Rename is immediate and persistent; deleting requires an explicit confirmation.
+        cdp.evaluate(f"document.querySelector('.st-key-manage_{run.id} button').click()")
+        cdp.click("Rename")
+        wait_until(lambda: cdp.evaluate("document.body.innerText.includes('Rename Research')"))
+        wait_until(lambda: cdp.evaluate("!!document.querySelector('[role=dialog] input')"))
+        cdp.evaluate("document.querySelector('[role=dialog] input').focus()")
+        cdp.call(
+            "Input.dispatchKeyEvent",
+            type="keyDown",
+            key="a",
+            code="KeyA",
+            modifiers=2,
+            windowsVirtualKeyCode=65,
+        )
+        cdp.call(
+            "Input.dispatchKeyEvent",
+            type="keyUp",
+            key="a",
+            code="KeyA",
+            modifiers=2,
+            windowsVirtualKeyCode=65,
+        )
+        cdp.call("Input.insertText", text="Human AI References")
+        cdp.evaluate("document.activeElement.blur()")
+        time.sleep(0.5)
+        cdp.click("Save Title")
+        wait_until(
+            lambda: cdp.evaluate(
+                "!document.querySelector('[role=dialog]') && "
+                "document.body.innerText.includes('Human AI References')"
+            )
+        )
+        assert cdp.pack_state()["ids"] == displayed
+        assert (
+            next(item for item in read_json("http://127.0.0.1:8100/search-runs") if item["id"] == run.id)[
+                "title"
+            ]
+            == "Human AI References"
+        )
+        cdp.screenshot("renamed.png")
+        cdp.evaluate(f"document.querySelector('.st-key-manage_{run.id} button').click()")
+        cdp.click("Delete")
+        wait_until(lambda: cdp.evaluate("document.body.innerText.includes('Delete Research?')"))
+        assert read_json(f"http://127.0.0.1:8100/search-runs/{run.id}")["id"] == run.id
+        cdp.click("Cancel")
+        wait_until(lambda: cdp.evaluate("!document.querySelector('[role=dialog]')"))
+        assert cdp.pack_state()["ids"] == displayed
+        cdp.evaluate(f"document.querySelector('.st-key-manage_{run.id} button').click()")
+        cdp.click("Delete")
+        wait_until(lambda: cdp.evaluate("document.body.innerText.includes('Delete Research?')"))
+        cdp.click("Delete Research")
+        wait_until(
+            lambda: cdp.evaluate(
+                "document.body.innerText.includes('Find References') && "
+                "!document.querySelector('.st-key-pack_panel')"
+            )
+        )
+        assert run.id not in [item["id"] for item in read_json("http://127.0.0.1:8100/search-runs")]
+        assert cdp.evaluate("document.querySelector('h1').innerText==='Reference Finder'")
+        cdp.screenshot("deleted-home.png")
+        print(
+            "Persistent header, equal card actions, icon toggle, rename and confirmed deletion passed",
+            flush=True,
         )
         (ARTIFACTS / "report.json").write_text(
             json.dumps(

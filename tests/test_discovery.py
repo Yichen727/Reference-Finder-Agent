@@ -416,8 +416,9 @@ def test_live_frontend_can_search_curate_and_export(settings, discovery_api, mon
         app.number_input[0].set_value(3)
         next(item for item in app.button if item.label == "Find References").click().run()
         assert not app.exception
-        assert len(app.checkbox) == 3
-        app.checkbox[0].check().run()
+        choices = [item for item in app.button if (item.key or "").startswith("pick_action_")]
+        assert len(choices) == 3
+        choices[0].click().run()
         next(item for item in app.button if item.label == "Export Reference Pack").click().run()
         assert not app.exception
         run_id = app.session_state["run_id"]

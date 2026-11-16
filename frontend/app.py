@@ -87,6 +87,17 @@ def close_detail():
     st.session_state.pop("active_detail", None)
 
 
+def close_management():
+    st.session_state.pop("research_management", None)
+
+
+def open_management(action: str, run_id: str, title: str):
+    close_detail()
+    st.session_state["research_management"] = {"action": action, "run_id": run_id, "title": title}
+    if action == "rename":
+        st.session_state[f"rename_title_{run_id}"] = title
+
+
 def open_detail(run_id: str, item_id: str):
     st.session_state["active_detail"] = (run_id, item_id)
 
@@ -109,12 +120,14 @@ def activate_run(run_id: str, *, reload_saved=False):
     st.session_state.update(run_id=run_id, run=run, brief=brief)
     st.session_state["recent_runs"] = client.request("GET", "/search-runs")
     close_detail()
+    close_management()
     st.session_state.pop("pending_research", None)
     st.query_params["run"] = run_id
 
 
 def new_research():
     close_detail()
+    close_management()
     for key in ["run_id", "run", "brief", "pending_research", "last_error"]:
         st.session_state.pop(key, None)
     st.query_params.clear()
@@ -153,7 +166,8 @@ def sidebar():
                 for item in recent:
                     active = item["id"] == st.session_state.get("run_id")
                     title = item.get("title") or item["summary"][:48]
-                    if st.button(
+                    title_column, menu_column = st.columns([5, 1], gap="xxsmall", wrap=False)
+                    if title_column.button(
                         title,
                         key=f"research_{item['id']}",
                         width="stretch",
@@ -162,8 +176,88 @@ def sidebar():
                     ):
                         activate_run(item["id"])
                         st.rerun()
+                    with menu_column.popover(
+                        "...",
+                        key=f"manage_{item['id']}",
+                        help=f"Manage {title}",
+                        type="tertiary",
+                        width="stretch",
+                    ):
+                        st.button(
+                            "Rename",
+                            key=f"rename_{item['id']}",
+                            width="stretch",
+                            on_click=open_management,
+                            args=("rename", item["id"], title),
+                        )
+                        st.button(
+                            "Delete",
+                            key=f"delete_{item['id']}",
+                            width="stretch",
+                            help="Delete research after confirmation. Running searches must finish first.",
+                            on_click=open_management,
+                            args=("delete", item["id"], title),
+                        )
         else:
             st.caption("No saved research yet.")
+
+
+@st.dialog("Manage Research", width="small", on_dismiss=close_management)
+def management_dialog():
+    target = st.session_state["research_management"]
+    run_id = target["run_id"]
+    if target["action"] == "rename":
+        st.subheader("Rename Research")
+        title = st.text_input("Research title", key=f"rename_title_{run_id}", max_chars=100)
+        save, cancel = st.columns(2)
+        submitted = save.button("Save Title", type="primary", width="stretch")
+        cancelled = cancel.button("Cancel", width="stretch")
+        if submitted:
+            if not title.strip():
+                st.error("Enter a research title.")
+                return
+            try:
+                saved = client.request("PATCH", f"/search-runs/{run_id}/title", {"title": title.strip()})
+            except APIError as error:
+                display_error(error)
+                return
+            for item in st.session_state.get("recent_runs", []):
+                if item["id"] == run_id:
+                    item["title"] = saved["title"]
+            presentation = st.session_state.get("presentations", {}).get(run_id)
+            if presentation is not None:
+                presentation["title"] = saved["title"]
+            close_management()
+            st.rerun()
+    else:
+        st.subheader("Delete Research?")
+        st.write(target["title"])
+        st.warning(
+            "This research will disappear from Recent Research and its saved links will stop opening it."
+        )
+        st.caption("The saved pack and export files are retained safely. Other research is unaffected.")
+        remove, cancel = st.columns(2)
+        submitted = remove.button("Delete Research", type="primary", width="stretch")
+        cancelled = cancel.button("Cancel", width="stretch")
+        if submitted:
+            try:
+                client.request("DELETE", f"/search-runs/{run_id}")
+            except APIError as error:
+                display_error(error)
+                return
+            recent = [item for item in st.session_state.get("recent_runs", []) if item["id"] != run_id]
+            for cache in ["pack_drafts", "pack_downloads", "presentations"]:
+                st.session_state.get(cache, {}).pop(run_id, None)
+            if st.session_state.get("conflict_run") == run_id:
+                st.session_state.pop("conflict_run", None)
+            if st.session_state.get("run_id") == run_id:
+                new_research()
+            st.session_state["recent_runs"] = recent
+            close_management()
+            st.rerun()
+    if cancelled:
+        close_management()
+        st.rerun()
 
 
 def submit_pending():
@@ -194,7 +288,7 @@ def brief_form(health):
         with st.expander("Advanced Options"):
             sources = st.multiselect("Sources", SOURCES, default=SOURCES)
             count = st.number_input(
-                "Reference Count", 1, health["max_references"], min(12, health["max_references"])
+                "Reference Count", 1, health["max_references"], min(10, health["max_references"])
             )
             constraints = st.text_area(
                 "Creative Constraints",
@@ -272,12 +366,32 @@ def reference_card(run, item, draft, previews):
         st.caption(f"{item['platform']} / {item['strand']}")
         annotation = draft["annotations"][item_id]
         st.markdown("**What to Borrow:** " + borrow_summary(annotation["what_to_borrow"]))
-        with st.container(horizontal=True, gap="xxsmall", vertical_alignment="center"):
-            st.link_button("View Original", item["source_url"])
-            key = f"pick_{run_id}_{item_id}"
-            st.session_state.setdefault(key, item_id in draft["ordered_ids"])
-            st.checkbox("Add to Pack", key=key, on_change=select_reference, args=(run_id, item_id, key))
-            st.button("View Details", key=f"details_{item_id}", on_click=open_detail, args=(run_id, item_id))
+        with st.container(key=f"card_actions_{item_id}"):
+            details, link, selection = st.columns(3, gap="xxsmall", wrap=False)
+            details.button(
+                "View Details",
+                key=f"details_{item_id}",
+                width="stretch",
+                wrap=True,
+                help=f"Read the existing analysis for {item['title']}",
+                on_click=open_detail,
+                args=(run_id, item_id),
+            )
+            link.link_button(
+                "Link ↗", item["source_url"], width="stretch", help="Open the original source in a new tab"
+            )
+            selected = item_id in draft["ordered_ids"]
+            with selection.container(key=f"card_select_{item_id}"):
+                st.button(
+                    "Remove from Pack" if selected else "Add to Pack",
+                    icon=":material/check:" if selected else ":material/add:",
+                    key=f"pick_action_{run_id}_{item_id}",
+                    width="stretch",
+                    type="primary" if selected else "secondary",
+                    help=f"{'Remove from' if selected else 'Add to'} Your Pack: {item['title']}",
+                    on_click=toggle_reference,
+                    args=(run_id, item_id),
+                )
 
 
 @st.dialog("Reference Details", width="medium", on_dismiss=close_detail)
@@ -290,7 +404,7 @@ def reference_details(run, item):
     st.caption(f"Creator: {item.get('creator') or 'Not listed'}")
     st.html(preview_markup(preview, item["title"]))
     original, selection = st.columns(2)
-    original.link_button("View Original", item["source_url"], width="stretch")
+    original.link_button("Open Link", item["source_url"], width="stretch")
     selected = item_id in draft_for(run)["ordered_ids"]
     if selection.button(
         "Remove from Pack" if selected else "Add to Pack",
@@ -471,6 +585,8 @@ def result_panel():
 
 def main():
     st.html(WORKSPACE_STYLE)
+    st.title("Reference Finder")
+    st.write("Turn your creative idea into a curated reference pack.")
     try:
         if "workspace_health" not in st.session_state:
             st.session_state["workspace_health"] = client.request("GET", "/health")
@@ -489,12 +605,12 @@ def main():
         elif st.session_state.get("run"):
             result_panel()
         else:
-            st.title("Reference Finder")
-            st.write("Turn your creative idea into a curated reference pack.")
             brief_form(health)
         detail = st.session_state.get("active_detail")
         run = st.session_state.get("run")
-        if detail and run and detail[0] == run["id"]:
+        if st.session_state.get("research_management"):
+            management_dialog()
+        elif detail and run and detail[0] == run["id"]:
             item = next((item for item in run["results"] if item["id"] == detail[1]), None)
             if item:
                 reference_details(run, item)

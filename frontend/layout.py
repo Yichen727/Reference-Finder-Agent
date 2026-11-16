@@ -13,6 +13,23 @@ WORKSPACE_STYLE = """
 .st-key-recent_research button[kind="primary"] {
   color: #25231f; background: #e8e5df; border-color: transparent;
 }
+.st-key-recent_research [data-testid="stColumn"] { min-width: 0 !important; }
+.st-key-recent_research [data-testid="stPopoverButton"] { min-width: 28px; }
+.st-key-recent_research [class*="st-key-manage_"] svg,
+.st-key-recent_research [class*="st-key-manage_"] [data-testid="stIconMaterial"] { display: none; }
+.st-key-recent_research [class*="st-key-manage_"] button p { text-align: center !important; }
+[class*="st-key-card_actions_"] [data-testid="stColumn"] {
+  min-width: 0 !important; flex: 1 1 0 !important;
+}
+[class*="st-key-card_actions_"] button,
+[class*="st-key-card_actions_"] a {
+  height: 2.5rem; min-height: 2.5rem; padding: .25rem .4rem;
+}
+[class*="st-key-card_actions_"] button p { line-height: 1.1; }
+[class*="st-key-card_select_"] button p {
+  position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0;
+  overflow: hidden; clip-path: inset(50%); white-space: nowrap;
+}
 [class*="st-key-reference_card_"] {
   overflow: hidden; height: 100%;
 }

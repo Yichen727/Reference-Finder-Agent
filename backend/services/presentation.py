@@ -71,6 +71,15 @@ class PresentationStore:
             ).fetchone()
         return json.loads(row["payload"]) if row else None
 
+    def rename(self, run_id: str, title: str):
+        self.repository.get("run", run_id)
+        with self.repository.connection() as connection:
+            connection.execute(
+                "INSERT INTO research_titles VALUES (?, ?) ON CONFLICT(run_id) "
+                "DO UPDATE SET title=excluded.title",
+                (run_id, title),
+            )
+
     def save_preview(self, key: str, value: dict, ttl: int):
         with self.repository.connection() as connection:
             connection.execute(

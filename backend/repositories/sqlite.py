@@ -1,6 +1,7 @@
 import json
 import sqlite3
 from contextlib import contextmanager
+from datetime import datetime, timezone
 from pathlib import Path
 
 from pydantic import BaseModel
@@ -34,6 +35,10 @@ class Repository:
                 "CREATE TABLE IF NOT EXISTS submissions (key TEXT PRIMARY KEY, "
                 "fingerprint TEXT NOT NULL, run_id TEXT NOT NULL)"
             )
+            conn.execute(
+                "CREATE TABLE IF NOT EXISTS deleted_research "
+                "(run_id TEXT PRIMARY KEY, deleted_at TEXT NOT NULL)"
+            )
             for row in conn.execute("SELECT id, payload FROM records WHERE kind='run'").fetchall():
                 data = json.loads(row["payload"])
                 if data["status"] in {"queued", "running"}:
@@ -54,6 +59,11 @@ class Repository:
 
     def get(self, kind: str, record_id: str) -> dict:
         with self.connection() as conn:
+            if (
+                kind == "run"
+                and conn.execute("SELECT 1 FROM deleted_research WHERE run_id=?", (record_id,)).fetchone()
+            ):
+                raise AppError("not_found", "This research is no longer available.", 404)
             row = conn.execute(
                 "SELECT payload FROM records WHERE kind=? AND id=?", (kind, record_id)
             ).fetchone()
@@ -63,8 +73,27 @@ class Repository:
 
     def recent_runs(self) -> list[dict]:
         with self.connection() as conn:
-            rows = conn.execute("SELECT payload FROM records WHERE kind='run' ORDER BY rowid DESC LIMIT 30")
+            rows = conn.execute(
+                "SELECT payload FROM records WHERE kind='run' AND NOT EXISTS "
+                "(SELECT 1 FROM deleted_research WHERE run_id=records.id) ORDER BY rowid DESC LIMIT 30"
+            )
             return [json.loads(row["payload"]) for row in rows]
+
+    def delete_research(self, run_id: str):
+        """Retain research, selections and files; revoke public access with a tombstone."""
+        with self.connection() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            row = conn.execute("SELECT payload FROM records WHERE kind='run' AND id=?", (run_id,)).fetchone()
+            if row is None:
+                raise AppError("not_found", "The requested research does not exist.", 404)
+            if conn.execute("SELECT 1 FROM deleted_research WHERE run_id=?", (run_id,)).fetchone():
+                return
+            if json.loads(row["payload"])["status"] in {"queued", "running"}:
+                raise AppError("research_busy", "Wait for this search to finish before deleting it.", 409)
+            conn.execute(
+                "INSERT INTO deleted_research VALUES (?, ?)",
+                (run_id, datetime.now(timezone.utc).isoformat()),
+            )
 
     def create_run(self, run: BaseModel, key: str, fingerprint: str) -> tuple[dict, bool]:
         with self.connection() as conn:
@@ -77,6 +106,10 @@ class Repository:
                     raise AppError(
                         "idempotency_conflict", "Submission key was already used for another request.", 409
                     )
+                if conn.execute(
+                    "SELECT 1 FROM deleted_research WHERE run_id=?", (existing["run_id"],)
+                ).fetchone():
+                    raise AppError("not_found", "This research was deleted. Start new research.", 404)
                 row = conn.execute(
                     "SELECT payload FROM records WHERE kind='run' AND id=?", (existing["run_id"],)
                 ).fetchone()
