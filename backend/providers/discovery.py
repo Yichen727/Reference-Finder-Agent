@@ -1,0 +1,414 @@
+import json
+import re
+import time
+from dataclasses import dataclass
+
+import openai
+
+from backend.core.config import ROOT, Settings
+from backend.core.errors import AppError
+from backend.providers.base import ProgressCallback
+from backend.providers.openai_errors import safe_openai_errors
+from backend.schemas.models import (
+    DiscoveryDraft,
+    Evidence,
+    ReferenceItem,
+    SearchOutcome,
+    SearchStrategy,
+    SourceCoverage,
+    StoredBrief,
+    UsageStats,
+    new_id,
+)
+from backend.services.source_policy import SearchJob, SourcePolicy, canonical_url
+
+
+class RequestBudget:
+    """Bound actual application-level requests, including explicit retries."""
+
+    def __init__(self, settings: Settings):
+        self.settings = settings
+        self.started = time.monotonic()
+        self.usage = UsageStats()
+
+    def call(self, operation, model: str, *, reserve: int = 0):
+        for attempt in range(self.settings.search_retry_count + 1):
+            remaining = self.settings.search_run_timeout_seconds - (time.monotonic() - self.started)
+            if remaining <= 0 or self.usage.requests_attempted >= self.settings.search_max_requests - reserve:
+                raise AppError(
+                    "search_budget_exhausted", "The search time or request budget was reached.", 504
+                )
+            self.usage.requests_attempted += 1
+            if model not in self.usage.models:
+                self.usage.models.append(model)
+            try:
+                with safe_openai_errors():
+                    response = operation(timeout=min(remaining, self.settings.search_timeout_seconds))
+                self.usage.requests_succeeded += 1
+                usage = getattr(response, "usage", None)
+                self.usage.input_tokens += getattr(usage, "input_tokens", 0) or 0
+                self.usage.output_tokens += getattr(usage, "output_tokens", 0) or 0
+                self.usage.web_search_calls += sum(
+                    getattr(item, "type", "") == "web_search_call"
+                    and getattr(item, "status", "") == "completed"
+                    for item in getattr(response, "output", [])
+                )
+                return response
+            except AppError as error:
+                retryable = error.code in {
+                    "openai_timeout",
+                    "openai_connection",
+                    "openai_rate_limit",
+                    "openai_unavailable",
+                }
+                if not retryable or attempt >= self.settings.search_retry_count:
+                    raise
+                time.sleep(0.5 * (attempt + 1))
+        raise AssertionError("Unreachable request budget state")
+
+    def finish(self) -> UsageStats:
+        self.usage.elapsed_seconds = round(time.monotonic() - self.started, 2)
+        return self.usage
+
+
+@dataclass
+class SourceNote:
+    evidence: Evidence
+    categories: list[str]
+    strand: str
+
+
+def citation_excerpt(text: str, index: int) -> str:
+    if not isinstance(index, int) or index < 0 or index > len(text):
+        return ""
+    start = text.rfind("\n\n", 0, index) + 2
+    start = max(0, start if start > 1 else 0)
+    end = text.find("\n\n", index)
+    section = text[start : end if end >= 0 else len(text)].strip()
+    # Retain nearby context without persisting an unbounded search response.
+    if len(section) > 1800:
+        relative = index - start
+        section = section[max(0, relative - 1300) : relative + 500]
+    return section
+
+
+def source_notes(response, job: SearchJob) -> list[SourceNote]:
+    data = response.model_dump(mode="json")
+    calls = [
+        item
+        for item in data.get("output", [])
+        if item.get("type") == "web_search_call" and item.get("status") == "completed"
+    ]
+    if not calls:
+        raise AppError(
+            "search_not_executed", "The response did not contain a completed Web Search call.", 502
+        )
+    catalogue = {}
+    for call in calls:
+        for source in (call.get("action") or {}).get("sources", []) or []:
+            url = canonical_url(source.get("url", ""))
+            if url:
+                catalogue[url] = source
+    notes: dict[str, SourceNote] = {}
+    for item in data.get("output", []):
+        if item.get("type") != "message":
+            continue
+        for content in item.get("content", []):
+            text = content.get("text", "")
+            for annotation in content.get("annotations", []):
+                if annotation.get("type") != "url_citation":
+                    continue
+                url = canonical_url(annotation.get("url", ""))
+                if not url or (catalogue and url not in catalogue):
+                    continue
+                excerpt = citation_excerpt(text, annotation.get("start_index", -1))
+                note = SourceNote(
+                    evidence=Evidence(
+                        source_url=url,
+                        page_title=(
+                            annotation.get("title")
+                            or catalogue.get(url, {}).get("title")
+                            or "Untitled source"
+                        )[:6000],
+                        excerpt=excerpt or "Consulted source; no adjacent work description was available.",
+                        access_status="unverified",
+                        evidence_type="search_summary" if excerpt else "source_listing",
+                    ),
+                    categories=job.categories,
+                    strand=job.strand,
+                )
+                if url in notes and len(notes[url].evidence.excerpt) > len(note.evidence.excerpt):
+                    continue
+                notes[url] = note
+    # Consulted-only URLs are kept as provenance, not fabricated work descriptions.
+    for url, source in catalogue.items():
+        if url not in notes:
+            notes[url] = SourceNote(
+                Evidence(
+                    source_url=url,
+                    page_title=(source.get("title") or "Untitled source")[:6000],
+                    excerpt="Consulted by Web Search; no cited work description was attached.",
+                    access_status="unverified",
+                    evidence_type="source_listing",
+                ),
+                job.categories,
+                job.strand,
+            )
+    return list(notes.values())
+
+
+def normalized_words(value: str) -> str:
+    return re.sub(r"[^a-z0-9]+", " ", value.casefold()).strip()
+
+
+class ExternalDiscovery:
+    def __init__(self, settings: Settings):
+        self.settings = settings
+        self.policy = SourcePolicy()
+
+    def search(
+        self, brief: StoredBrief, strategy: SearchStrategy, progress: ProgressCallback | None = None
+    ) -> SearchOutcome:
+        if not self.settings.search_configured:
+            raise AppError("openai_not_configured", "Configure the OpenAI key and model settings first.", 503)
+        budget = RequestBudget(self.settings)
+        outcome = SearchOutcome(
+            coverage=[
+                SourceCoverage(
+                    category=category,
+                    note=self.policy.sources[category]["note"],
+                )
+                for category in strategy.preferred_sources
+            ]
+        )
+        coverage = {item.category: item for item in outcome.coverage}
+        notes: dict[str, SourceNote] = {}
+        jobs = self.policy.jobs(strategy, self.settings.search_query_limit)
+        prompt = (ROOT / "prompts/search.txt").read_text(encoding="utf-8")
+        last_error = None
+        try:
+            with openai.OpenAI(
+                api_key=self.settings.openai_api_key.get_secret_value(),
+                timeout=self.settings.search_timeout_seconds,
+                max_retries=0,
+            ) as client:
+                for index, job in enumerate(jobs, 1):
+                    if progress:
+                        progress(f"searching_{index}_of_{len(jobs)}")
+                    before_attempts = budget.usage.requests_attempted
+                    tool = {"type": "web_search", "search_context_size": "medium"}
+                    if job.domains:
+                        tool["filters"] = {"allowed_domains": job.domains}
+                    reasoning = (
+                        {"reasoning": {"effort": "low"}}
+                        if self.settings.openai_search_model.startswith("gpt-5")
+                        else {}
+                    )
+                    payload = {
+                        "brief": brief.model_dump(exclude={"id", "created_at"}),
+                        "strand": job.strand,
+                        "queries": job.queries,
+                        "source_categories": job.categories,
+                        "source_instructions": job.instructions,
+                        "target_works": min(8, brief.requested_count),
+                    }
+                    try:
+                        response = budget.call(
+                            lambda **kwargs: client.responses.create(
+                                model=self.settings.openai_search_model,
+                                instructions=prompt,
+                                input=json.dumps(payload),
+                                tools=[tool],
+                                tool_choice="required",
+                                max_tool_calls=1,
+                                include=["web_search_call.action.sources"],
+                                max_output_tokens=4500,
+                                store=False,
+                                **reasoning,
+                                **kwargs,
+                            ),
+                            self.settings.openai_search_model,
+                            reserve=1,
+                        )
+                        if response.status != "completed":
+                            raise AppError(
+                                "incomplete_search",
+                                "Search output was incomplete; some source coverage may be missing.",
+                                502,
+                            )
+                        discovered = source_notes(response, job)
+                        for note in discovered:
+                            url = str(note.evidence.source_url)
+                            previous = notes.get(url)
+                            if previous is None or (
+                                previous.evidence.evidence_type == "source_listing"
+                                and note.evidence.evidence_type == "search_summary"
+                            ):
+                                notes[url] = note
+                        # Prefer cited work descriptions when limiting the candidate pool.
+                        ordered = sorted(
+                            notes.items(), key=lambda pair: pair[1].evidence.evidence_type != "search_summary"
+                        )
+                        notes = dict(ordered[: self.settings.search_candidate_limit])
+                        if not discovered:
+                            outcome.partial = True
+                            outcome.warnings.append(
+                                f"No traceable sources returned for {', '.join(job.categories)}."
+                            )
+                    except AppError as error:
+                        last_error = error
+                        outcome.partial = True
+                        outcome.warnings.append(
+                            f"{', '.join(job.categories)}: {error.message} ({error.code})"
+                        )
+                        if error.code in {
+                            "search_budget_exhausted",
+                            "openai_authentication",
+                            "openai_permission",
+                            "openai_quota",
+                            "openai_request_failed",
+                        }:
+                            break
+                    finally:
+                        if budget.usage.requests_attempted > before_attempts:
+                            for category in job.categories:
+                                coverage[category].queries_attempted += 1
+                outcome.evidence = [note.evidence for note in notes.values()]
+                described = [
+                    note for note in notes.values() if note.evidence.evidence_type == "search_summary"
+                ]
+                if not described:
+                    outcome.error_code = last_error.code if last_error else "no_search_evidence"
+                    outcome.warnings.append(
+                        "No cited individual-work evidence was available. Try different queries or sources."
+                    )
+                    return outcome
+                if progress:
+                    progress("organizing_search_evidence")
+                context = {
+                    "brief": brief.model_dump(exclude={"id", "created_at"}),
+                    "strategy": strategy.model_dump(),
+                    "sources": [
+                        {
+                            "id": note.evidence.id,
+                            "title": note.evidence.page_title,
+                            "url": str(note.evidence.source_url),
+                            "search_summary": note.evidence.excerpt,
+                            "source_categories": note.categories,
+                            "strand": note.strand,
+                        }
+                        for note in described
+                    ],
+                }
+                with safe_openai_errors():
+                    response = budget.call(
+                        lambda **kwargs: client.responses.parse(
+                            model=self.settings.openai_model,
+                            instructions=(ROOT / "prompts/discovery.txt").read_text(encoding="utf-8"),
+                            input=json.dumps(context),
+                            text_format=DiscoveryDraft,
+                            max_output_tokens=min(11000, 1400 + brief.requested_count * 650),
+                            store=False,
+                            **kwargs,
+                        ),
+                        self.settings.openai_model,
+                    )
+                if response.status != "completed" or response.output_parsed is None:
+                    raise AppError(
+                        "invalid_model_output",
+                        "The model could not produce a valid evidence-grounded shortlist.",
+                        502,
+                    )
+                self.build_results(outcome, response.output_parsed, notes, brief, strategy)
+        except AppError as error:
+            outcome.error_code = error.code
+            outcome.partial = True
+            outcome.warnings.append(error.message)
+        finally:
+            outcome.usage = budget.finish()
+        if outcome.results:
+            outcome.error_code = None
+            if len(outcome.results) < brief.requested_count:
+                outcome.partial = True
+                outcome.warnings.append(
+                    f"Returned {len(outcome.results)} references; target was {brief.requested_count}."
+                )
+        else:
+            outcome.error_code = outcome.error_code or "no_eligible_references"
+        outcome.warnings.append(
+            "Search citations identify discovery evidence. Original pages, videos, credits "
+            "and usage rights have not been independently verified."
+        )
+        for item in outcome.coverage:
+            if item.queries_attempted == 0:
+                outcome.partial = True
+                outcome.warnings.append(f"{item.category} was not searched within this run's budget.")
+        return outcome
+
+    def build_results(self, outcome, draft, notes, brief, strategy):
+        by_id = {note.evidence.id: note for note in notes.values()}
+        seen_urls, seen_works = set(), set()
+        discarded = 0
+        limit = min(brief.requested_count, self.settings.max_references)
+        for candidate in draft.references:
+            primary = by_id.get(candidate.primary_evidence_id)
+            if primary is None or primary.evidence.evidence_type != "search_summary":
+                discarded += 1
+                continue
+            evidence = primary.evidence
+            title = normalized_words(candidate.title)
+            supporting_text = normalized_words(evidence.page_title + " " + evidence.excerpt)
+            url = str(evidence.source_url)
+            category = self.policy.category(url, candidate.platform, strategy.preferred_sources)
+            if not title or title not in supporting_text or category is None:
+                discarded += 1
+                continue
+            creator = candidate.creator if normalized_words(candidate.creator) in supporting_text else ""
+            work_key = title
+            if url in seen_urls or work_key in seen_works:
+                continue
+            seen_urls.add(url)
+            seen_works.add(work_key)
+            annotation = candidate.annotation.model_copy(deep=True)
+            annotation.confidence = "low"
+            annotation.rights_note = (
+                "Link for reference discussion only. Image and video reproduction "
+                "permission has not been established."
+            )
+            annotation.assumptions = list(
+                dict.fromkeys(
+                    annotation.assumptions
+                    + [
+                        "Based on cited search summaries; page and video not independently reviewed.",
+                    ]
+                )
+            )[:10]
+            valid_strands = {strand.name for strand in strategy.strands}
+            ids = list(
+                dict.fromkeys(
+                    [evidence.id]
+                    + [item_id for item_id in candidate.supporting_evidence_ids if item_id in by_id]
+                )
+            )
+            outcome.results.append(
+                ReferenceItem(
+                    id=new_id(),
+                    title=candidate.title,
+                    creator=creator,
+                    platform=category,
+                    source_url=evidence.source_url,
+                    tags=candidate.tags,
+                    strand=candidate.strand if candidate.strand in valid_strands else primary.strand,
+                    evidence_ids=ids,
+                    verification_status="unverified",
+                    is_mock=False,
+                    annotation=annotation,
+                )
+            )
+            next(item for item in outcome.coverage if item.category == category).references_returned += 1
+            if len(outcome.results) >= limit:
+                break
+        if discarded:
+            outcome.warnings.append(
+                f"Excluded {discarded} proposed references without matching titles, sources or evidence IDs."
+            )

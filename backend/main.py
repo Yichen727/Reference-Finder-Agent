@@ -1,0 +1,189 @@
+import logging
+from contextlib import asynccontextmanager
+from uuid import UUID
+
+from fastapi import BackgroundTasks, FastAPI, Request
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import FileResponse, JSONResponse
+from starlette.exceptions import HTTPException
+
+from backend.core.config import Settings
+from backend.core.errors import AppError
+from backend.providers.openai_provider import OpenAIProvider
+from backend.repositories.sqlite import Repository
+from backend.schemas.models import (
+    ExportRecord,
+    ReferenceBrief,
+    SearchRequest,
+    SearchRun,
+    SearchStrategy,
+    Selection,
+    SelectionInput,
+    StoredBrief,
+)
+from backend.services.source_policy import SourcePolicy
+from backend.services.workflow import Workflow
+
+
+def create_app(settings: Settings | None = None) -> FastAPI:
+    config = settings or Settings()
+    repo = Repository(config.data_dir / "reference_finder.sqlite3")
+    workflow = Workflow(config, repo)
+
+    @asynccontextmanager
+    async def lifespan(app: FastAPI):
+        repo.initialize()
+        yield
+
+    app = FastAPI(title="Atomized Reference Finder", version="0.1.0", lifespan=lifespan)
+    app.state.workflow = workflow
+
+    @app.exception_handler(AppError)
+    async def application_error(request: Request, error: AppError):
+        return JSONResponse(
+            status_code=error.status, content={"error": {"code": error.code, "message": error.message}}
+        )
+
+    @app.exception_handler(HTTPException)
+    async def http_error(request: Request, error: HTTPException):
+        messages = {
+            404: "The requested endpoint does not exist.",
+            405: "This HTTP method is not supported for this endpoint.",
+        }
+        return JSONResponse(
+            status_code=error.status_code,
+            headers=error.headers,
+            content={
+                "error": {
+                    "code": "http_error",
+                    "message": messages.get(error.status_code, "The HTTP request could not be processed."),
+                }
+            },
+        )
+
+    @app.exception_handler(RequestValidationError)
+    async def validation_error(request: Request, error: RequestValidationError):
+        # Do not echo rejected input (which may include secrets or a private brief).
+        fields = [
+            {"field": ".".join(str(part) for part in item["loc"]), "type": item["type"]}
+            for item in error.errors()
+        ]
+        return JSONResponse(
+            status_code=422,
+            content={
+                "error": {
+                    "code": "validation_error",
+                    "message": "Check the request fields and reference limit (1–15).",
+                    "fields": fields,
+                }
+            },
+        )
+
+    @app.exception_handler(Exception)
+    async def unexpected_error(request: Request, error: Exception):
+        logging.getLogger(__name__).error("Unhandled request error: %s", type(error).__name__)
+        return JSONResponse(
+            status_code=500,
+            content={
+                "error": {
+                    "code": "internal_error",
+                    "message": "The request failed. Please retry or check the backend configuration.",
+                }
+            },
+        )
+
+    @app.get("/health")
+    def health():
+        return {
+            "status": "ok",
+            "mode": config.app_mode,
+            "max_references": config.max_references,
+            "openai_configured": config.openai_configured,
+            "live_search_ready": config.app_mode == "live" and config.search_configured,
+            "live_search_verified": workflow.live_search_verified,
+            "models": {"planning": config.openai_model, "search": config.openai_search_model},
+            "search_provider": config.search_provider,
+            "capabilities": {
+                "mock_workflow": True,
+                "live_strategy": config.openai_configured,
+                "live_search": config.search_configured,
+            },
+        }
+
+    @app.get("/sources")
+    def sources():
+        return SourcePolicy().sources
+
+    @app.post("/providers/openai/check")
+    def check_openai():
+        # Explicit, user-triggered small model call; never run as part of health polling.
+        brief = StoredBrief(concept="A short film explaining creative collaboration.", requested_count=1)
+        strategy = OpenAIProvider(config).strategy(brief)
+        return {
+            "connected": True,
+            "structured_output": True,
+            "model": config.openai_model,
+            "summary": strategy.summary,
+            "live_search_verified": False,
+        }
+
+    @app.post("/briefs", response_model=StoredBrief, status_code=201)
+    def create_brief(value: ReferenceBrief):
+        return workflow.create_brief(value)
+
+    @app.get("/briefs/{brief_id}", response_model=StoredBrief)
+    def get_brief(brief_id: UUID):
+        return workflow.brief(str(brief_id))
+
+    @app.post("/briefs/{brief_id}/strategy", response_model=SearchStrategy)
+    def create_strategy(brief_id: UUID):
+        return workflow.provider.strategy(workflow.brief(str(brief_id)))
+
+    @app.post("/search-runs", response_model=SearchRun, status_code=202)
+    def submit_run(value: SearchRequest, background: BackgroundTasks):
+        run, created = workflow.submit(value)
+        if created:
+            background.add_task(workflow.execute, run.id)
+        return run
+
+    @app.get("/search-runs")
+    def recent_runs():
+        return [
+            {
+                "id": run["id"],
+                "mode": run["mode"],
+                "status": run["status"],
+                "summary": run["strategy"]["summary"][:120],
+                "created_at": run["created_at"],
+            }
+            for run in repo.recent_runs()
+        ]
+
+    @app.get("/search-runs/{run_id}", response_model=SearchRun)
+    def get_run(run_id: UUID):
+        return workflow.run(str(run_id))
+
+    @app.put("/search-runs/{run_id}/selection", response_model=Selection)
+    def save_selection(run_id: UUID, value: SelectionInput):
+        return workflow.save_selection(str(run_id), value)
+
+    @app.post("/search-runs/{run_id}/exports/docx", response_model=ExportRecord, status_code=201)
+    def export_docx(run_id: UUID):
+        return workflow.export(str(run_id))
+
+    @app.get("/exports/{export_id}/download")
+    def download_export(export_id: UUID):
+        record = ExportRecord.model_validate(repo.get("export", str(export_id)))
+        path = config.data_dir / "exports" / record.filename
+        if not path.is_file():
+            raise AppError("export_missing", "Export file is missing; generate it again.", 404)
+        return FileResponse(
+            path,
+            media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            filename=f"Atomized-Reference-Pack-{record.id[:8]}.docx",
+        )
+
+    return app
+
+
+app = create_app()

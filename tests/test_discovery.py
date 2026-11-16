@@ -1,0 +1,347 @@
+import json
+from pathlib import Path
+from types import SimpleNamespace
+from uuid import uuid4
+
+import httpx
+import openai
+import pytest
+from fastapi.testclient import TestClient
+from pydantic import SecretStr
+from streamlit.testing.v1 import AppTest
+
+from backend.main import create_app
+from backend.schemas.models import Annotation, DiscoveredReference, DiscoveryDraft, QueryStrand, StrategyDraft
+from backend.services.source_policy import canonical_url
+from frontend.api_client import APIClient, APIError
+
+
+def api_response(data, parsed=None):
+    return SimpleNamespace(
+        status=data.get("status", "completed"),
+        output_parsed=parsed,
+        output=[
+            SimpleNamespace(type=item["type"], status=item.get("status")) for item in data.get("output", [])
+        ],
+        usage=SimpleNamespace(input_tokens=100, output_tokens=50),
+        model_dump=lambda **kwargs: data,
+    )
+
+
+@pytest.fixture
+def discovery_api(monkeypatch):
+    state = {
+        "calls": [],
+        "web_attempts": 0,
+        "failures": {},
+        "inject_unknown": False,
+        "no_tool": False,
+        "no_citations": False,
+    }
+
+    class Client:
+        def __init__(self, **kwargs):
+            assert kwargs["max_retries"] in {0, 1}
+            self.responses = self
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            pass
+
+        def create(self, **kwargs):
+            state["calls"].append(kwargs)
+            state["web_attempts"] += 1
+            index = state["web_attempts"]
+            if index in state["failures"]:
+                raise state["failures"][index]
+            payload = json.loads(kwargs["input"])
+            category = payload["source_categories"][0]
+            domains = {
+                "Vimeo": "vimeo.com",
+                "YouTube": "youtube.com",
+                "Instagram": "instagram.com",
+                "Pinterest": "pinterest.com",
+                "Award archives": "dandad.org",
+            }
+            url = f"https://{domains.get(category, 'studio.test')}/work/shared-futures-{index}"
+            title = f"Shared Futures {index}"
+            text = (
+                f"{title} by Example Studio. A character-led environmental campaign. "
+                "A warm story with a comic reveal."
+            )
+            calls = (
+                []
+                if state["no_tool"]
+                else [
+                    {
+                        "type": "web_search_call",
+                        "status": "completed",
+                        "action": {"type": "search", "sources": [{"url": url, "title": title}]},
+                    },
+                    {"type": "web_search_call", "status": "searching", "action": {"type": "search"}},
+                ]
+            )
+            citations = (
+                []
+                if state["no_citations"]
+                else [
+                    {
+                        "type": "url_citation",
+                        "url": url,
+                        "title": title,
+                        "start_index": len(text) - 1,
+                        "end_index": len(text),
+                    }
+                ]
+            )
+            return api_response(
+                {
+                    "output": calls
+                    + [
+                        {
+                            "type": "message",
+                            "content": [
+                                {
+                                    "type": "output_text",
+                                    "text": text,
+                                    "annotations": citations,
+                                }
+                            ],
+                        }
+                    ]
+                }
+            )
+
+        def parse(self, **kwargs):
+            if kwargs["text_format"] is StrategyDraft:
+                draft = StrategyDraft(
+                    summary="Research warm environmental films",
+                    assumptions=[],
+                    strands=[
+                        QueryStrand(
+                            name=name, intent=f"Explore {name}", queries=[f"environmental film {name}"]
+                        )
+                        for name in ["Tone", "Craft", "Format"]
+                    ],
+                )
+                return api_response({}, draft)
+            state["calls"].append(kwargs)
+            context = json.loads(kwargs["input"])
+            candidates = []
+            for source in context["sources"]:
+                candidates.append(
+                    DiscoveredReference(
+                        title=source["title"],
+                        creator="Example Studio",
+                        primary_evidence_id=source["id"],
+                        supporting_evidence_ids=[],
+                        platform=source["source_categories"][0],
+                        tags=["story"],
+                        strand=source["strand"],
+                        annotation=Annotation(
+                            what_it_is=source["search_summary"],
+                            what_to_borrow="A character-led narrative",
+                            why_it_fits="Connects an environmental topic with a human perspective.",
+                            production_note="Casting and access need producer review.",
+                            confidence="high",
+                        ),
+                    )
+                )
+            if state["inject_unknown"]:
+                fake = candidates[0].model_copy(
+                    update={"title": "Invented work", "primary_evidence_id": "unknown"}
+                )
+                candidates.insert(0, fake)
+            return api_response({}, DiscoveryDraft(references=candidates[:15]))
+
+    monkeypatch.setattr(openai, "OpenAI", Client)
+    return state
+
+
+def execute(client, count=3, sources=None):
+    response = client.post(
+        "/briefs",
+        json={
+            "concept": "A warm environmental film with unexpected humour",
+            "requested_count": count,
+            **({"preferred_sources": sources} if sources else {}),
+        },
+    )
+    assert response.status_code == 201
+    brief = response.json()
+    response = client.post(f"/briefs/{brief['id']}/strategy")
+    assert response.status_code == 200, response.text
+    response = client.post(
+        "/search-runs",
+        json={
+            "brief_id": brief["id"],
+            "strategy": response.json(),
+            "idempotency_key": str(uuid4()),
+        },
+    )
+    assert response.status_code == 202, response.text
+    return client.get(f"/search-runs/{response.json()['id']}").json()
+
+
+def live_settings(settings):
+    settings.app_mode = "live"
+    settings.openai_api_key = SecretStr("test-key-do-not-return")
+    return settings
+
+
+def test_live_search_records_sources_usage_and_exports(settings, discovery_api):
+    with TestClient(create_app(live_settings(settings))) as client:
+        assert not client.get("/health").json()["live_search_verified"]
+        run = execute(client)
+        assert run["status"] == "completed"
+        assert len(run["results"]) == 3
+        assert run["usage"]["web_search_calls"] == 4
+        assert run["usage"]["requests_attempted"] == 5
+        assert run["usage"]["input_tokens"] == 500
+        assert len(run["coverage"]) == 7
+        assert all(item["queries_attempted"] >= 1 for item in run["coverage"])
+        assert all(
+            not item["is_mock"] and item["verification_status"] == "unverified" for item in run["results"]
+        )
+        assert all(item["annotation"]["confidence"] == "low" for item in run["results"])
+        assert client.get("/health").json()["live_search_verified"]
+        assert "test-key-do-not-return" not in json.dumps(run)
+        saved = client.put(
+            f"/search-runs/{run['id']}/selection",
+            json={
+                "ordered_ids": [run["results"][0]["id"]],
+                "expected_version": 0,
+            },
+        )
+        assert saved.status_code == 200
+        assert client.post(f"/search-runs/{run['id']}/exports/docx").status_code == 201
+        for call in discovery_api["calls"]:
+            assert call["store"] is False
+            if "tools" in call:
+                assert call["tool_choice"] == "required" and call["max_tool_calls"] == 1
+
+
+def test_only_grounded_ids_can_become_reference_urls(settings, discovery_api):
+    discovery_api["inject_unknown"] = True
+    with TestClient(create_app(live_settings(settings))) as client:
+        run = execute(client)
+    assert len(run["results"]) == 3
+    assert all(item["title"] != "Invented work" for item in run["results"])
+    assert any("Excluded" in warning for warning in run["warnings"])
+
+
+def test_domain_preferences_and_budget_are_enforced(settings, discovery_api):
+    settings = live_settings(settings)
+    settings.search_max_requests = 3
+    with TestClient(create_app(settings)) as client:
+        run = execute(client, sources=["YouTube"])
+    assert run["status"] == "partial"
+    assert 0 < len(run["results"]) < 3
+    assert run["usage"]["requests_attempted"] <= 3
+    assert run["usage"]["web_search_calls"] == 2
+    for call in discovery_api["calls"]:
+        if "tools" in call:
+            assert call["tools"][0]["filters"]["allowed_domains"] == ["youtube.com", "youtu.be"]
+
+
+def test_failed_group_keeps_other_source_results(settings, discovery_api):
+    settings = live_settings(settings)
+    settings.search_retry_count = 0
+    discovery_api["failures"][2] = openai.APITimeoutError(
+        request=httpx.Request("POST", "https://api.openai.com")
+    )
+    with TestClient(create_app(settings)) as client:
+        run = execute(client)
+    assert run["status"] == "partial"
+    assert run["results"] and run["usage"]["web_search_calls"] == 3
+    assert any("timeout" in warning.lower() for warning in run["warnings"])
+
+
+def test_transient_failure_retries_within_global_budget(settings, discovery_api):
+    discovery_api["failures"][1] = openai.APITimeoutError(
+        request=httpx.Request("POST", "https://api.openai.com")
+    )
+    with TestClient(create_app(live_settings(settings))) as client:
+        run = execute(client)
+    assert run["results"]
+    assert run["usage"]["requests_attempted"] == 6
+    assert run["usage"]["requests_succeeded"] == 5
+
+
+@pytest.mark.parametrize("mode", ["no_tool", "no_citations"])
+def test_search_without_tool_or_cited_work_cannot_fake_success(settings, discovery_api, mode):
+    discovery_api[mode] = True
+    with TestClient(create_app(live_settings(settings))) as client:
+        run = execute(client)
+    assert run["status"] == "failed" and not run["results"]
+    assert run["error_code"] in {"search_not_executed", "no_search_evidence"}
+
+
+def test_authentication_failure_stops_and_never_exposes_upstream_body(settings, discovery_api):
+    response = httpx.Response(401, request=httpx.Request("POST", "https://api.openai.com"))
+    discovery_api["failures"][1] = openai.AuthenticationError("sensitive detail", response=response, body={})
+    with TestClient(create_app(live_settings(settings))) as client:
+        run = execute(client)
+    assert run["status"] == "failed" and run["error_code"] == "openai_authentication"
+    assert run["usage"]["requests_attempted"] == 1
+    assert "sensitive detail" not in json.dumps(run)
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "http://127.0.0.1/work",
+        "http://10.0.0.1",
+        "http://localhost/x",
+        "javascript:alert(1)",
+        "https://example.invalid/work",
+        "https://youtube.com@127.0.0.1/",
+    ],
+)
+def test_non_public_or_unsafe_reference_links_are_rejected(url):
+    assert canonical_url(url) is None
+
+
+def test_live_frontend_can_search_curate_and_export(settings, discovery_api, monkeypatch):
+    with TestClient(create_app(live_settings(settings))) as client:
+
+        def request(self, method, path, payload=None, *, binary=False):
+            response = client.request(method, path, json=payload)
+            if response.is_error:
+                raise APIError(response.json()["error"]["message"])
+            return response.content if binary else response.json()
+
+        monkeypatch.setattr(APIClient, "request", request)
+        app = AppTest.from_file(
+            str(Path(__file__).resolve().parents[1] / "frontend/app.py"), default_timeout=15
+        ).run()
+        assert not app.exception
+        next(item for item in app.text_area if item.label == "Creative concept *").input(
+            "A warm sustainability film"
+        )
+        app.number_input[0].set_value(3)
+        next(item for item in app.button if item.label == "Build research strategy").click().run()
+        assert not app.exception
+        search = next(item for item in app.button if item.label == "Search external references")
+        assert not search.disabled
+        search.click().run()
+        assert not app.exception
+        assert len(app.checkbox) == 3
+        app.checkbox[0].check().run()
+        next(item for item in app.button if item.label == "Save selection and annotations").click().run()
+        next(item for item in app.button if item.label == "Generate DOCX from saved selection").click().run()
+        assert not app.exception
+        assert app.session_state["download"]["content"].startswith(b"PK")
+
+
+def test_url_cleanup_preserves_access_and_video_identifiers():
+    assert (
+        canonical_url("https://vimeo.com/123?h=private-hash&utm_source=x")
+        == "https://vimeo.com/123?h=private-hash"
+    )
+    assert (
+        canonical_url("https://www.youtube.com/watch?v=abc&utm_medium=x")
+        == "https://www.youtube.com/watch?v=abc"
+    )
