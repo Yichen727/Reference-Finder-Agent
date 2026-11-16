@@ -4,7 +4,10 @@ import httpx
 
 
 class APIError(Exception):
-    pass
+    def __init__(self, message: str, *, code: str | None = None, status: int | None = None):
+        super().__init__(message)
+        self.code = code
+        self.status = status
 
 
 class APIClient:
@@ -17,14 +20,16 @@ class APIClient:
             with httpx.Client(base_url=self.base_url, timeout=110, trust_env=False) as client:
                 response = client.request(method, path, json=payload)
             if response.is_error:
+                code = None
                 try:
                     detail = response.json()["error"]
+                    code = detail.get("code")
                     message = f"{detail['message']} ({detail['code']})"
                     if detail.get("fields"):
                         message += " — " + ", ".join(item["field"] for item in detail["fields"])
                 except (ValueError, KeyError, TypeError):
                     message = f"Backend returned HTTP {response.status_code}."
-                raise APIError(message)
+                raise APIError(message, code=code, status=response.status_code)
             return response.content if binary else response.json()
         except httpx.TimeoutException:
             raise APIError(

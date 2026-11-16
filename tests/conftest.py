@@ -3,16 +3,18 @@ from fastapi.testclient import TestClient
 
 from backend.core.config import Settings
 from backend.main import create_app
+from tests.fixtures import FixtureProvider
 
 
 @pytest.fixture
 def settings(tmp_path):
-    return Settings(_env_file=None, data_dir=tmp_path, app_mode="mock", openai_api_key="", openai_model="")
+    return Settings(_env_file=None, data_dir=tmp_path, openai_api_key="test-only-key", openai_model="")
 
 
 @pytest.fixture
 def client(settings):
     with TestClient(create_app(settings)) as instance:
+        instance.app.state.workflow.provider = FixtureProvider()
         yield instance
 
 

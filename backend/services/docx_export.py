@@ -41,12 +41,6 @@ def render_docx(path: Path, brief: StoredBrief, run: SearchRun):
     doc.add_paragraph(
         f"Run: {run.id}\nSelection version: {selection.version}\nCreated: {selection.updated_at.isoformat()}"
     )
-    if run.mode == "mock":
-        doc.add_paragraph(
-            "MOCK DEMONSTRATION — All examples are fictional and URLs are placeholders."
-            " No external search or source verification has taken place.",
-            style="Subtitle",
-        )
     doc.add_heading("Creative brief", level=1)
     doc.add_paragraph(brief.concept)
     for label, value in [

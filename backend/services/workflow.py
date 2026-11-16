@@ -5,7 +5,6 @@ import threading
 from backend.core.config import Settings
 from backend.core.errors import AppError
 from backend.providers.base import ReferenceProvider
-from backend.providers.mock import MockProvider
 from backend.providers.openai_provider import OpenAIProvider
 from backend.repositories.sqlite import Repository
 from backend.schemas.models import (
@@ -24,9 +23,7 @@ from backend.services.docx_export import render_docx
 class Workflow:
     def __init__(self, settings: Settings, repository: Repository):
         self.settings, self.repository = settings, repository
-        self.provider: ReferenceProvider = (
-            MockProvider() if settings.app_mode == "mock" else OpenAIProvider(settings)
-        )
+        self.provider: ReferenceProvider = OpenAIProvider(settings)
         self.job_slot = threading.Semaphore(1)
         self.edit_lock = threading.Lock()
         self.live_search_verified = False
@@ -52,9 +49,9 @@ class Workflow:
         brief = self.brief(request.brief_id)
         if request.strategy.brief_id != brief.id:
             raise AppError("strategy_mismatch", "Strategy does not belong to this brief.", 422)
-        if request.strategy.is_mock != (self.settings.app_mode == "mock"):
+        if request.strategy.is_mock:
             raise AppError(
-                "strategy_mode_mismatch", "Regenerate the strategy in the current application mode.", 409
+                "archived_strategy", "Start new research to generate a current search strategy.", 409
             )
         if not set(request.strategy.preferred_sources) <= set(brief.preferred_sources):
             raise AppError(
@@ -62,7 +59,7 @@ class Workflow:
                 "Strategy sources must be selected in the original brief.",
                 422,
             )
-        if self.settings.app_mode == "live" and not self.settings.search_configured:
+        if not self.settings.search_configured:
             raise AppError("openai_not_configured", "Configure the OpenAI key and model settings first.", 503)
         run = SearchRun(brief_id=brief.id, strategy=request.strategy, mode=self.settings.app_mode)
         payload = request.model_dump(exclude={"idempotency_key"}, mode="json")
@@ -74,8 +71,7 @@ class Workflow:
         with self.job_slot:
             run = self.run(run_id)
             try:
-                stage = "preparing_mock_results" if run.mode == "mock" else "starting_external_search"
-                run.status, run.stage, run.updated_at = "running", stage, now()
+                run.status, run.stage, run.updated_at = "running", "starting_external_search", now()
                 self.repository.put("run", run)
 
                 def progress(stage: str):
@@ -121,6 +117,8 @@ class Workflow:
     def save_selection(self, run_id: str, value: SelectionInput) -> Selection:
         with self.edit_lock:
             run = self.run(run_id)
+            if run.mode != "live":
+                raise AppError("archived_run", "Archived demonstration runs are read-only.", 409)
             if run.status not in {"completed", "partial"}:
                 raise AppError("run_not_ready", "Wait for the run to finish before saving a selection.", 409)
             version = run.selection.version if run.selection else 0
@@ -144,10 +142,16 @@ class Workflow:
             self.repository.put("run", run)
             return selection
 
-    def export(self, run_id: str) -> ExportRecord:
+    def export(self, run_id: str, expected_version: int | None = None) -> ExportRecord:
         run = self.run(run_id)
+        if run.mode != "live":
+            raise AppError("archived_run", "Archived demonstration runs cannot be exported.", 409)
         if not run.selection or not run.selection.ordered_ids:
             raise AppError("empty_selection", "Save at least one selected reference before exporting.", 422)
+        if expected_version is not None and run.selection.version != expected_version:
+            raise AppError(
+                "selection_conflict", "The saved pack changed before export. Reload and try again.", 409
+            )
         record = ExportRecord(run_id=run.id, selection_version=run.selection.version, filename="")
         record.filename = f"{record.id}.docx"
         folder = self.settings.data_dir / "exports"

@@ -75,7 +75,8 @@ class StrategyDraft(Model):
 class SearchStrategy(StrategyDraft):
     brief_id: str
     preferred_sources: list[Source] = Field(min_length=1, max_length=7)
-    is_mock: bool
+    # Retained to read archived records and preserve the existing API shape.
+    is_mock: bool = False
 
 
 class Evidence(Model):
@@ -84,8 +85,10 @@ class Evidence(Model):
     page_title: Text
     excerpt: Text
     retrieved_at: datetime = Field(default_factory=now)
-    access_status: Literal["mock", "unverified", "accessible", "restricted", "unreachable"] = "mock"
-    evidence_type: Literal["mock", "search_snippet", "search_summary", "source_listing", "page_text"] = "mock"
+    access_status: Literal["mock", "unverified", "accessible", "restricted", "unreachable"] = "unverified"
+    evidence_type: Literal["mock", "search_snippet", "search_summary", "source_listing", "page_text"] = (
+        "source_listing"
+    )
 
 
 class Annotation(Model):
@@ -98,6 +101,13 @@ class Annotation(Model):
     rights_note: Text = "No image or video reproduction permission has been established."
 
 
+class ApprovedThumbnail(Model):
+    url: HttpUrl
+    source_url: HttpUrl
+    usage_status: Literal["approved"]
+    available: bool = False
+
+
 class ReferenceItem(Model):
     id: str
     title: Text
@@ -108,8 +118,9 @@ class ReferenceItem(Model):
     tags: list[Text] = Field(max_length=20)
     strand: Text
     evidence_ids: list[str] = Field(min_length=1, max_length=20)
-    verification_status: Literal["mock", "unverified", "supported"] = "mock"
-    is_mock: bool = True
+    verification_status: Literal["mock", "unverified", "supported"] = "unverified"
+    is_mock: bool = False
+    thumbnail: ApprovedThumbnail | None = None
     annotation: Annotation
 
 
@@ -215,3 +226,7 @@ class ExportRecord(Model):
     selection_version: int
     filename: str
     created_at: datetime = Field(default_factory=now)
+
+
+class ExportRequest(Model):
+    expected_selection_version: int | None = Field(default=None, ge=1)

@@ -55,8 +55,8 @@ def workspace_running(opener, backend_url: str, frontend_url: str) -> bool:
             health = json.load(response)
         if not (
             health.get("status") == "ok"
-            and health.get("mode") in {"mock", "live"}
-            and health.get("capabilities", {}).get("mock_workflow") is True
+            and health.get("mode") == "live"
+            and "live_search" in health.get("capabilities", {})
             and health.get("search_provider") == "openai"
         ):
             return False

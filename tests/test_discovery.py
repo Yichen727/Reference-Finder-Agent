@@ -318,22 +318,18 @@ def test_live_frontend_can_search_curate_and_export(settings, discovery_api, mon
             str(Path(__file__).resolve().parents[1] / "frontend/app.py"), default_timeout=15
         ).run()
         assert not app.exception
-        next(item for item in app.text_area if item.label == "Creative concept *").input(
+        next(item for item in app.text_area if item.label == "Describe your creative idea").input(
             "A warm sustainability film"
         )
         app.number_input[0].set_value(3)
-        next(item for item in app.button if item.label == "Build research strategy").click().run()
-        assert not app.exception
-        search = next(item for item in app.button if item.label == "Search external references")
-        assert not search.disabled
-        search.click().run()
+        next(item for item in app.button if item.label == "Find References").click().run()
         assert not app.exception
         assert len(app.checkbox) == 3
         app.checkbox[0].check().run()
-        next(item for item in app.button if item.label == "Save selection and annotations").click().run()
-        next(item for item in app.button if item.label == "Generate DOCX from saved selection").click().run()
+        next(item for item in app.button if item.label == "Export Reference Pack").click().run()
         assert not app.exception
-        assert app.session_state["download"]["content"].startswith(b"PK")
+        run_id = app.session_state["run_id"]
+        assert app.session_state["pack_downloads"][run_id]["content"].startswith(b"PK")
 
 
 def test_url_cleanup_preserves_access_and_video_identifiers():

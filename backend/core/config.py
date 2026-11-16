@@ -10,7 +10,7 @@ ROOT = Path(__file__).resolve().parents[2]
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=ROOT / ".env", extra="ignore", env_file_encoding="utf-8-sig")
 
-    app_mode: Literal["mock", "live"] = "mock"
+    app_mode: Literal["live"] = "live"
     data_dir: Path = ROOT / "data"
     openai_api_key: SecretStr = SecretStr("")
     openai_model: str = "gpt-4.1-mini"

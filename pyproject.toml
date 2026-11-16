@@ -23,9 +23,6 @@ dev = ["pytest>=8,<10", "ruff>=0.9,<1"]
 [tool.setuptools.packages.find]
 include = ["backend*", "frontend*"]
 
-[tool.setuptools.package-data]
-"backend.providers" = ["*.json"]
-
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]

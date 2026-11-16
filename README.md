@@ -3,19 +3,36 @@
 A local Streamlit workspace with a FastAPI backend for creative reference research.
 Code, the interface and exported documents are English-only. `PLAN.md` is maintained in Chinese.
 
-Phase 2 provides real external reference discovery, alongside an optional **Mock** workflow:
+The workspace provides real external reference discovery:
 
-1. Describe a creative route and production constraints.
-2. Review and edit a research strategy.
-3. Search selected source categories and review up to 15 source-backed references.
-4. Select references, edit annotations, set their order and save.
-5. Generate and download a structured DOCX from the saved selection.
-6. Restore a run from the sidebar or its shareable local URL.
+1. Describe your creative idea and click **Find References**.
+2. The app generates a strategy and starts searching automatically.
+3. Browse up to 15 references in two-column cards and choose **Add to Pack**.
+4. Review your pack, reorder with **Up / Down**, or remove a reference.
+5. Click **Export Reference Pack** to save the latest edits and prepare a DOCX download.
 
-Live mode uses OpenAI Web Search. It records source citations, coverage, timestamps and
+Search uses OpenAI Web Search. It records source citations, coverage, timestamps and
 request/token usage. Restricted platforms may return fewer works or none. Individual pages
 and full videos have not yet been independently inspected; that deeper verification is Phase 3.
-Internal decks remain deferred. Mock examples and URLs are explicitly labelled as fictional.
+Internal decks remain deferred. The demonstration provider and runtime mode have been removed.
+Archived demonstration records remain readable for compatibility, are hidden from Recent
+Research, and cannot be reused or exported as real references.
+
+## Interface
+
+The home screen contains an idea field and one primary search action. **Advanced Options**
+holds the optional Brief fields, source selection, result count and **Edit Search Strategy**
+opt-in. Manual query review is never required for the default workflow.
+
+Cards show the work title, source, creative strand, a short **What to Borrow**, **View Original**
+and **Add to Pack**. **Details / Edit** contains full annotations, production observations,
+evidence, verification, assumptions and usage notes. Images appear only when thumbnail
+metadata explicitly confirms an approved usage status and availability; there is a text-only
+fallback and no automatic image invention or collection.
+
+The sidebar contains **New Research**, **Recent Research**, and a Live search indicator.
+Models, connection checks, coverage, usage, full search warnings and technical errors are
+inside the collapsed **Developer Settings** section.
 
 ## Setup
 
@@ -75,7 +92,7 @@ Keep one backend worker: the current task executor and edit lock are process-loc
 
 ## OpenAI configuration
 
-Mock mode works without a key or `.env` file. To prepare a model connection:
+A valid key and model access are required. To prepare a model connection:
 
 ```powershell
 # New setup only: preserve an existing .env containing your key.
@@ -91,7 +108,7 @@ OPENAI_MODEL=gpt-4.1-mini
 OPENAI_SEARCH_MODEL=gpt-5.4-mini
 ```
 
-Restart the backend. Click **Check OpenAI connection** in the sidebar. This is an
+Restart the backend. Open **Developer Settings** and click **Check Connection**. This is an
 explicit, small Responses API call that checks model access and structured output.
 The key is not returned to the frontend, database, logs or exported documents.
 Health checks do not call OpenAI and show configuration readiness only.
@@ -102,9 +119,10 @@ sample workflow have been verified. A successful model check alone does not esta
 Search availability: `/health` reports configuration readiness separately from successful
 search verification in the current backend session.
 
-Choose **Search external references** after reviewing the strategy. A run is queued and
-the interface polls progress without resubmitting on reruns. Failures never fall back to
-fictional references. Use `APP_MODE=mock` for offline demonstrations.
+Choose **Find References** to generate the strategy and submit a run in one action.
+The interface polls readable progress without resubmitting on reruns. Failed submissions
+can be resumed with their original idempotency key. Failures return clear errors instead
+of fictional references. `APP_MODE` accepts only `live`.
 
 Restart the existing launcher after code or `.env` changes; double-clicking while an older
 workspace is running simply opens that existing process and does not reload its configuration.
@@ -157,14 +175,21 @@ The check saves an isolated SQLite run, `result.json` and DOCX under
 ## Curation and persistence
 
 - References start unselected; the creative lead makes the final choice.
-- Save selection and annotations before generating a DOCX. Export always uses the
-  latest saved version, including manual wording and order.
-- Edit the order numbers in the selected-reference table. Ties keep the current order.
+- Export automatically saves selection, ordering and annotation edits before generating
+  the DOCX. There is no separate manual-save step.
+- Use **Up / Down** in **Your Pack** to reorder, or **Remove** to deselect a reference.
+- Draft edits survive Streamlit reruns and navigation between research records in the same
+  browser session. Export persists them to SQLite; unsaved browser drafts do not survive a
+  fresh browser session.
 - Run URLs include `?run=<id>` so a fresh session can restore saved state.
 - SQLite records are saved to `data/reference_finder.sqlite3`; documents are saved to
   `data/exports/`. Both are ignored by Git.
-- Selection version checks prevent a stale browser session from overwriting newer
-  edits. Reopen the saved run from the sidebar if a version conflict occurs.
+- Selection version checks prevent a stale session from overwriting newer edits. Export
+  checks the version returned by the save operation, so a concurrent change cannot produce
+  a download of another selection. **Load Saved Pack** resolves a conflict by explicitly
+  replacing the local draft with the saved version.
+- If generation fails after saving, the updated version is retained for a safe retry.
+  Editing or reordering a pack removes its stale download button.
 - The server rejects counts above 15, duplicate selection IDs, references from another
   run and edits to unselected references. `MAX_REFERENCES` can lower the cap, never raise it.
 - Duplicate submissions with the same key and payload reuse the same run. Reusing the
@@ -184,12 +209,12 @@ are later phases.
 | POST | `/providers/openai/check` | Explicit structured model connection check |
 | POST | `/briefs` | Validate and save a Brief |
 | GET | `/briefs/{id}` | Restore a Brief |
-| POST | `/briefs/{id}/strategy` | Generate a Mock or live research strategy |
-| POST | `/search-runs` | Submit an idempotent Mock or live external-search run |
+| POST | `/briefs/{id}/strategy` | Generate a research strategy |
+| POST | `/search-runs` | Submit an idempotent external-search run |
 | GET | `/search-runs` | List the 30 most recent runs |
 | GET | `/search-runs/{id}` | Read status, results, evidence and saved selection |
 | PUT | `/search-runs/{id}/selection` | Save order and annotations with version checks |
-| POST | `/search-runs/{id}/exports/docx` | Export the saved selection |
+| POST | `/search-runs/{id}/exports/docx` | Export the saved selection; optional expected-version check |
 | GET | `/exports/{id}/download` | Download a generated DOCX |
 
 Errors use `{"error": {"code": "...", "message": "..."}}`. Validation errors include
@@ -208,7 +233,9 @@ Tests cover the API workflow, result cap, invalid selections, idempotency, resta
 recovery, edited and ordered DOCX contents, clickable hyperlink relationships,
 sanitized provider failures, Streamlit curation, download preparation and fresh-session
 restoration, grounded source IDs, domain filtering, bounded retries, partial success and
-Live-mode UI interaction. Normal tests use test doubles and do not spend API credits.
+one-click search, optional strategy editing, navigation-safe drafts, Up/Down ordering,
+automatic save/export, late version conflicts and retries. Normal tests use a test-only
+provider and API test doubles; these are not runtime modes and do not spend API credits.
 DOCX content is checked programmatically; visual review in Microsoft Word
 belongs to the full export acceptance phase.
 
@@ -216,10 +243,11 @@ belongs to the full export acceptance phase.
 
 ```text
 frontend/                  Streamlit interface and HTTP client
+frontend/curation.py        Durable browser draft and selection helpers
 backend/main.py            FastAPI application and routes
 backend/core/              Settings and safe application errors
 backend/schemas/           Pydantic contracts and reference limits
-backend/providers/         Provider interface, Mock fixtures and OpenAI adapter
+backend/providers/         Provider interface and OpenAI search adapter
 config/sources.json        Source categories, domains and coverage policies
 scripts/verify_live.py     Explicit live search and DOCX verification
 backend/repositories/      SQLite storage and atomic submission deduplication

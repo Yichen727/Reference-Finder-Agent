@@ -13,6 +13,7 @@ from backend.providers.openai_provider import OpenAIProvider
 from backend.repositories.sqlite import Repository
 from backend.schemas.models import (
     ExportRecord,
+    ExportRequest,
     ReferenceBrief,
     SearchRequest,
     SearchRun,
@@ -104,7 +105,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "models": {"planning": config.openai_model, "search": config.openai_search_model},
             "search_provider": config.search_provider,
             "capabilities": {
-                "mock_workflow": True,
+                "mock_workflow": False,
                 "live_strategy": config.openai_configured,
                 "live_search": config.search_configured,
             },
@@ -168,8 +169,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return workflow.save_selection(str(run_id), value)
 
     @app.post("/search-runs/{run_id}/exports/docx", response_model=ExportRecord, status_code=201)
-    def export_docx(run_id: UUID):
-        return workflow.export(str(run_id))
+    def export_docx(run_id: UUID, value: ExportRequest | None = None):
+        return workflow.export(str(run_id), value.expected_selection_version if value else None)
 
     @app.get("/exports/{export_id}/download")
     def download_export(export_id: UUID):
