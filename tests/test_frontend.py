@@ -64,11 +64,9 @@ def open_app():
     return app
 
 
-def launch(app, concept="A warm film about a shared future", *, count=3, manual=False):
+def launch(app, concept="A warm film about a shared future", *, count=3):
     area(app, "Describe your creative idea").input(concept)
     app.number_input[0].set_value(count)
-    if manual:
-        next(item for item in app.checkbox if item.label == "Edit Search Strategy").check()
     button(app, "Find References").click().run()
     assert not app.exception
     return app
@@ -76,6 +74,18 @@ def launch(app, concept="A warm film about a shared future", *, count=3, manual=
 
 def pick(app, run, index):
     widget(app.checkbox, f"pick_{run['id']}_{run['results'][index]['id']}").check().run()
+
+
+def details(app, item):
+    widget(app.button, f"details_{item['id']}").click().run()
+    assert not app.exception
+
+
+def edit_borrow(app, run, item, value):
+    details(app, item)
+    widget(app.text_area, f"edit_{run['id']}_{item['id']}_what_to_borrow").input(value).run()
+    button(app, "Done").click().run()
+    assert not app.exception
 
 
 def test_home_is_simple_and_defaults_launch_with_one_click(bridge, client):
@@ -105,9 +115,7 @@ def test_export_automatically_saves_latest_order_and_annotations(bridge, client)
     first, second = run["results"][:2]
     pick(app, run, 0)
     pick(app, run, 1)
-    widget(app.text_area, f"edit_{run['id']}_{first['id']}_what_to_borrow").input(
-        "My revised creative principle"
-    ).run()
+    edit_borrow(app, run, first, "My revised creative principle")
     widget(app.button, f"down_{first['id']}").click().run()
     assert app.session_state["pack_drafts"][run["id"]]["ordered_ids"] == [second["id"], first["id"]]
     widget(app.button, f"up_{first['id']}").click().run()
@@ -137,9 +145,7 @@ def test_remove_and_navigation_preserve_unsaved_annotation_drafts(bridge):
     first, second = run["results"][:2]
     pick(app, run, 0)
     pick(app, run, 1)
-    widget(app.text_area, f"edit_{run['id']}_{first['id']}_what_to_borrow").input(
-        "Keep this draft across navigation"
-    ).run()
+    edit_borrow(app, run, first, "Keep this draft across navigation")
     widget(app.button, f"remove_{second['id']}").click().run()
     assert not widget(app.checkbox, f"pick_{run['id']}_{second['id']}").value
     button(app, "New Research").click().run()
@@ -148,20 +154,29 @@ def test_remove_and_navigation_preserve_unsaved_annotation_drafts(bridge):
     button(app, "Open Research").click().run()
     assert app.session_state["run_id"] == run["id"]
     assert widget(app.checkbox, f"pick_{run['id']}_{first['id']}").value
+    details(app, first)
     assert (
         widget(app.text_area, f"edit_{run['id']}_{first['id']}_what_to_borrow").value
         == "Keep this draft across navigation"
     )
 
 
-def test_optional_strategy_editing_does_not_submit_until_confirmed(bridge, client):
-    app = launch(open_app(), manual=True)
-    assert not client.get("/search-runs").json()
-    assert app.subheader[0].value == "Edit Search Strategy"
-    widget(app.text_area, "strategy_queries_0").input("a precise revised query")
-    button(app, "Find References").click().run()
+def test_search_options_only_expose_sources_count_and_constraints(bridge, client):
+    app = open_app()
+    assert [item.label for item in app.text_area] == ["Describe your creative idea", "Creative Constraints"]
+    assert [item.label for item in app.multiselect] == ["Sources"]
+    assert [item.label for item in app.number_input] == ["Reference Count"]
+    assert not app.text_input and not app.checkbox
+    area(app, "Creative Constraints").input("One location, no dialogue, avoid aerial shots")
+    launch(app, concept="A playful 30-second film for young commuters")
     assert not app.exception
-    assert app.session_state["run"]["strategy"]["strands"][0]["queries"] == ["a precise revised query"]
+    brief = app.session_state["brief"]
+    assert brief["constraints"] == "One location, no dialogue, avoid aerial shots"
+    submitted = next(
+        payload for method, path, payload in bridge["requests"] if method == "POST" and path == "/briefs"
+    )
+    assert set(submitted) == {"concept", "constraints", "preferred_sources", "requested_count"}
+    assert app.session_state["run"]["strategy"]["strands"]
 
 
 def test_lost_submission_response_reuses_the_same_run(bridge, client):
@@ -243,15 +258,17 @@ def test_filters_preserve_hidden_selections_and_annotation_edits(bridge, client)
     first = record["results"][0]
     pick(restored, record, 0)
     edit_key = f"edit_{run.id}_{first['id']}_what_to_borrow"
-    widget(restored.text_area, edit_key).input("Preserve this annotation through filters").run()
+    edit_borrow(restored, record, first, "Preserve this annotation through filters")
     widget(restored.multiselect, f"source_filter_{run.id}").set_value(["YouTube"]).run()
     assert len(restored.checkbox) == 1
     assert first["id"] in restored.session_state["pack_drafts"][run.id]["ordered_ids"]
     widget(restored.multiselect, f"source_filter_{run.id}").set_value([]).run()
     assert widget(restored.checkbox, f"pick_{run.id}_{first['id']}").value
+    details(restored, first)
     assert widget(restored.text_area, edit_key).value == "Preserve this annotation through filters"
-    widget(restored.selectbox, f"evidence_filter_{run.id}").set_value("Page checked").run()
-    assert len(restored.checkbox) == 0
+    button(restored, "Done").click().run()
+    widget(restored.multiselect, f"strand_filter_{run.id}").set_value(["Execution"]).run()
+    assert len(restored.checkbox) == 1
     assert first["id"] in restored.session_state["pack_drafts"][run.id]["ordered_ids"]
 
 
@@ -261,6 +278,7 @@ def test_exclusions_are_saved_with_the_pack_and_can_be_restored(bridge, client):
     first, second = run["results"][:2]
     pick(app, run, 0)
     pick(app, run, 1)
+    details(app, second)
     widget(app.button, f"exclude_{second['id']}").click().run()
     assert len(app.checkbox) == 2
     assert second["id"] not in app.session_state["pack_drafts"][run["id"]]["ordered_ids"]
@@ -300,3 +318,52 @@ def test_frontend_handles_backend_unavailable(monkeypatch):
     app = open_app()
     assert app.error
     assert button(app, "Retry")
+
+
+def test_cards_only_render_editors_for_the_open_reference(bridge):
+    app = launch(open_app())
+    run = app.session_state["run"]
+    first, second = run["results"][:2]
+    assert not [item for item in app.text_area if (item.key or "").startswith("edit_")]
+    assert not any(item.label == "Details / Edit" for item in app.expander)
+    details(app, first)
+    editors = [item for item in app.text_area if (item.key or "").startswith("edit_")]
+    assert len(editors) == 4
+    assert all(first["id"] in item.key for item in editors)
+    assert any(item.value == "**Rights and usage**" for item in app.markdown)
+    button(app, "Done").click().run()
+    assert not [item for item in app.text_area if (item.key or "").startswith("edit_")]
+    details(app, second)
+    assert all(second["id"] in item.key for item in app.text_area if (item.key or "").startswith("edit_"))
+
+
+def test_borrow_summary_is_short_without_changing_the_annotation():
+    from frontend.layout import borrow_summary
+
+    original = "First creative principle. Second creative principle! Extra detail belongs in the dialog."
+    assert borrow_summary(original) == "First creative principle. Second creative principle!"
+    assert len(borrow_summary("An extended creative idea " * 50)) <= 280
+
+
+def test_new_search_from_results_preserves_previous_drafts_and_retry_key(bridge, client):
+    app = launch(open_app())
+    original = app.session_state["run"]
+    pick(app, original, 0)
+    edit_borrow(app, original, original["results"][0], "Keep the first research draft")
+    assert any(item.label == "New Search" for item in app.expander)
+    bridge["lose_submission"] = True
+    launch(app, concept="Another idea, submitted directly from results")
+    assert app.error and len(client.get("/search-runs").json()) == 2
+    app.run()
+    button(app, "Continue Search").click().run()
+    assert not app.exception
+    assert app.session_state["run_id"] != original["id"]
+    assert len(client.get("/search-runs").json()) == 2
+    next(item for item in app.selectbox if item.label == "Recent Research").set_value(original["id"]).run()
+    button(app, "Open Research").click().run()
+    draft = app.session_state["pack_drafts"][original["id"]]
+    assert draft["ordered_ids"] == [original["results"][0]["id"]]
+    assert (
+        draft["annotations"][original["results"][0]["id"]]["what_to_borrow"]
+        == "Keep the first research draft"
+    )

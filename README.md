@@ -7,7 +7,7 @@ The workspace provides real external reference discovery:
 
 1. Describe your creative idea and click **Find References**.
 2. The app generates a strategy and starts searching automatically.
-3. Browse up to 15 references in two-column cards and choose **Add to Pack**.
+3. Browse up to 15 compact references on the left and choose **Add to Pack**.
 4. Review your pack, reorder with **Up / Down**, or remove a reference.
 5. Click **Export Reference Pack** to save the latest edits and prepare a DOCX download.
 
@@ -22,23 +22,33 @@ Research, and cannot be reused or exported as real references.
 ## Interface
 
 The home screen contains an idea field and one primary search action. **Advanced Options**
-holds the optional Brief fields, source selection, result count and **Edit Search Strategy**
-opt-in. Manual query review is never required for the default workflow.
+contains only **Sources**, **Reference Count** and **Creative Constraints**. The existing
+planning model interprets audience, format, tone and purpose from the idea; optional Brief
+fields remain supported by the API. Search strategy generation runs automatically.
+
+Results use a 75/25 workspace: **Reference Results** on the left and **Your Pack** on the
+right. The pack stays visible while scrolling on wide screens and scrolls independently
+when long. At viewport widths of 1100px or less, panels stack with a **View Your Pack**
+shortcut. **New Search** above the results opens the same simple search form. Earlier
+research drafts remain available when navigating back to those records.
 
 Cards show the work title, source, creative strand, a short **What to Borrow**, **View Original**
-and **Add to Pack**. **Details / Edit** contains full annotations, production observations,
+and **Add to Pack**. The summary contains at most two sentences. **View Details** opens a
+single-reference dialog containing full annotation editors, production observations,
 evidence, page status, ranking reasons, alternate sources, assumptions and usage notes.
-The collapsed **Filter Results** section filters sources, creative strands and evidence
-status. **Exclude Reference** removes a candidate from browsing and the pack;
+Rights information is directly visible in the dialog; evidence and ranking details have
+their own expanders. Closing the dialog retains draft edits. Editors are created only for
+the open reference. The collapsed **Filter Results** section filters sources and creative
+categories. **Exclude Reference** in the dialog removes a candidate from browsing and the pack;
 **Restore Excluded References** brings it back. Filters never deselect hidden references
 or discard annotation edits. Export saves explicit exclusions with the selection.
 Images appear only when thumbnail
 metadata explicitly confirms an approved usage status and availability; there is a text-only
 fallback and no automatic image invention or collection.
 
-The sidebar contains **New Research**, **Recent Research**, and a Live search indicator.
-Models, connection checks, coverage, usage, full search warnings and technical errors are
-inside the collapsed **Developer Settings** section.
+The sidebar contains **New Research**, **Recent Research** and **Open Research**.
+Developer diagnostics are separate from the user interface: use the backend's `/health`,
+research JSON and interactive `/docs` endpoints for configuration, coverage and usage checks.
 
 ## Setup
 
@@ -114,8 +124,8 @@ OPENAI_MODEL=gpt-4.1-mini
 OPENAI_SEARCH_MODEL=gpt-5.4-mini
 ```
 
-Restart the backend. Open **Developer Settings** and click **Check Connection**. This is an
-explicit, small Responses API call that checks model access and structured output.
+Restart the backend. Developers can use **POST /providers/openai/check** in the backend's
+interactive `/docs` for an explicit, small Responses API call checking model access and structured output.
 The key is not returned to the frontend, database, logs or exported documents.
 Health checks do not call OpenAI and show configuration readiness only.
 
@@ -302,7 +312,7 @@ Tests cover the API workflow, result cap, invalid selections, idempotency, resta
 recovery, edited and ordered DOCX contents, clickable hyperlink relationships,
 sanitized provider failures, Streamlit curation, download preparation and fresh-session
 restoration, grounded source IDs, domain filtering, bounded retries, partial success and
-one-click search, optional strategy editing, navigation-safe drafts, Up/Down ordering,
+one-click search, simplified options, on-demand detail editors, navigation-safe drafts, Up/Down ordering,
 automatic save/export, late version conflicts, retries, DNS pinning/private redirects,
 robots restrictions, bounded downloads, work merging, ranking and filtered/excluded drafts.
 Normal tests use a test-only
@@ -315,6 +325,7 @@ belongs to the full export acceptance phase.
 ```text
 frontend/                  Streamlit interface and HTTP client
 frontend/curation.py        Durable browser draft and selection helpers
+frontend/layout.py          Scoped responsive layout and compact summary helpers
 backend/main.py            FastAPI application and routes
 backend/core/              Settings and safe application errors
 backend/schemas/           Pydantic contracts and reference limits

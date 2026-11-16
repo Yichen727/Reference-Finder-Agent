@@ -4,6 +4,7 @@ import streamlit as st
 
 from frontend.api_client import APIClient, APIError
 from frontend.curation import EDIT_FIELDS, draft_from_run, selection_payload
+from frontend.layout import WORKSPACE_STYLE, borrow_summary
 
 SOURCES = [
     "Vimeo",
@@ -78,6 +79,19 @@ def restore_excluded(run_id: str):
     changed(run_id)
 
 
+def close_detail():
+    st.session_state.pop("active_detail", None)
+
+
+def open_detail(run_id: str, item_id: str):
+    st.session_state["active_detail"] = (run_id, item_id)
+
+
+def exclude_from_detail(run_id: str, item_id: str):
+    exclude_reference(run_id, item_id)
+    close_detail()
+
+
 def activate_run(run_id: str, *, reload_saved=False):
     run = client.request("GET", f"/search-runs/{run_id}")
     brief = client.request("GET", f"/briefs/{run['brief_id']}")
@@ -89,11 +103,13 @@ def activate_run(run_id: str, *, reload_saved=False):
         st.session_state.setdefault("pack_downloads", {}).pop(run_id, None)
         st.session_state.pop("conflict_run", None)
     st.session_state.update(run_id=run_id, run=run, brief=brief)
+    close_detail()
     st.session_state.pop("pending_research", None)
     st.query_params["run"] = run_id
 
 
 def new_research():
+    close_detail()
     for key in ["run_id", "run", "brief", "pending_research", "last_error"]:
         st.session_state.pop(key, None)
     st.query_params.clear()
@@ -105,7 +121,7 @@ def display_error(error: APIError):
         st.session_state["conflict_run"] = st.session_state.get("run_id")
         st.error("This saved pack changed in another session. Load the saved version before exporting.")
     elif error.code in {"openai_not_configured", "openai_authentication", "openai_permission"}:
-        st.error("Search is unavailable. Check the connection in Developer Settings.")
+        st.error("The search service is unavailable. Please contact the workspace administrator.")
     elif error.code in {"openai_rate_limit", "openai_quota"}:
         st.error("The search service has reached its usage limit. Please try again later.")
     elif error.code == "validation_error":
@@ -116,7 +132,7 @@ def display_error(error: APIError):
         st.error("We could not complete that request. Please try again. Your current edits are kept.")
 
 
-def sidebar(health):
+def sidebar():
     with st.sidebar:
         st.caption("ATOMIZED STUDIOS")
         st.button("New Research", on_click=new_research, width="stretch")
@@ -130,39 +146,6 @@ def sidebar(health):
                 st.rerun()
         else:
             st.caption("No saved research yet.")
-        st.caption("Live search")
-        with st.expander("Developer Settings"):
-            st.json(
-                {
-                    "models": health.get("models", {}),
-                    "configured": health["openai_configured"],
-                    "search_verified": health.get("live_search_verified", False),
-                }
-            )
-            if st.button("Check Connection", disabled=not health["openai_configured"]):
-                with st.spinner("Checking connection..."):
-                    client.request("POST", "/providers/openai/check")
-                st.success("OpenAI is connected.")
-            st.caption("This check makes one small model request.")
-            run = st.session_state.get("run")
-            if run:
-                st.json(
-                    {
-                        "run_id": run["id"],
-                        "status": run["status"],
-                        "stage": run["stage"],
-                        "usage": run.get("usage", {}),
-                        "coverage": run.get("coverage", []),
-                        "page_checks": run.get("page_checks", []),
-                    }
-                )
-                for warning in run.get("warnings", []):
-                    st.caption(warning)
-                st.caption(
-                    "Pack edits are kept in this browser session. Export saves them to the research record."
-                )
-            if st.session_state.get("last_error"):
-                st.code(st.session_state["last_error"], language=None)
 
 
 def submit_pending():
@@ -191,93 +174,42 @@ def brief_form(health):
             placeholder="A short film that makes a complex idea feel human...",
         )
         with st.expander("Advanced Options"):
-            left, right = st.columns(2)
-            purpose = left.text_input("Purpose")
-            audience = right.text_input("Audience")
-            format_value = left.text_input("Format")
-            platform = right.text_input("Platform")
-            qualities = st.text_input("Tone and creative qualities")
-            constraints = st.text_area("Production constraints", height=90)
-            known = st.text_area("Known references", height=90)
-            exclusions = st.text_area("Exclusions", height=90)
             sources = st.multiselect("Sources", SOURCES, default=SOURCES)
             count = st.number_input(
-                "Maximum references", 1, health["max_references"], min(12, health["max_references"])
+                "Reference Count", 1, health["max_references"], min(12, health["max_references"])
             )
-            manual = st.checkbox("Edit Search Strategy")
+            constraints = st.text_area(
+                "Creative Constraints",
+                height=90,
+                placeholder="Budget, timing, required elements, or anything to avoid (optional)",
+            )
         submit = st.form_submit_button("Find References", type="primary")
     if submit:
         if not concept.strip() or not sources:
             st.error("Describe your idea and select at least one source.")
             return
         if not health["live_search_ready"]:
-            st.error("Search is unavailable. Check the connection in Developer Settings.")
+            st.error("The search service is unavailable. Please contact the workspace administrator.")
             return
         brief = client.request(
             "POST",
             "/briefs",
             {
                 "concept": concept,
-                "purpose": purpose,
-                "audience": audience,
-                "format": format_value,
-                "platform": platform,
-                "qualities": qualities,
                 "constraints": constraints,
-                "known_references": known,
-                "exclusions": exclusions,
                 "preferred_sources": sources,
                 "requested_count": int(count),
             },
         )
-        pending = {"brief": brief, "strategy": None, "submission_key": str(uuid4()), "manual": manual}
+        pending = {"brief": brief, "strategy": None, "submission_key": str(uuid4())}
         st.session_state["pending_research"] = pending
-        if manual:
-            with st.spinner("Understanding your idea..."):
-                pending["strategy"] = client.request("POST", f"/briefs/{brief['id']}/strategy")
-            st.rerun()
+        close_detail()
         submit_pending()
 
 
-def strategy_panel():
-    pending = st.session_state["pending_research"]
-    strategy = pending.get("strategy")
-    if strategy is None:
-        st.info("Your idea is saved. Continue to prepare the search.")
-        if st.button("Continue Search", type="primary"):
-            if pending["manual"]:
-                pending["strategy"] = client.request("POST", f"/briefs/{pending['brief']['id']}/strategy")
-                st.rerun()
-            submit_pending()
-        return
-    if not pending["manual"]:
-        st.info("Your search is ready to resume.")
-        if st.button("Continue Search", type="primary"):
-            submit_pending()
-        return
-    st.subheader("Edit Search Strategy")
-    with st.form("strategy_form"):
-        summary = st.text_area("Research direction", value=strategy["summary"])
-        strands = []
-        for index, strand in enumerate(strategy["strands"]):
-            with st.expander(strand["name"], expanded=index == 0):
-                name = st.text_input("Strand", value=strand["name"], key=f"strategy_name_{index}")
-                intent = st.text_input("Intent", value=strand["intent"], key=f"strategy_intent_{index}")
-                queries = st.text_area(
-                    "Queries (one per line)",
-                    value="\n".join(strand["queries"]),
-                    key=f"strategy_queries_{index}",
-                )
-                strands.append(
-                    {
-                        "name": name,
-                        "intent": intent,
-                        "queries": [line.strip() for line in queries.splitlines() if line.strip()],
-                    }
-                )
-        submitted = st.form_submit_button("Find References", type="primary")
-    if submitted:
-        pending["strategy"] = {**strategy, "summary": summary, "strands": strands}
+def resume_search():
+    st.info("Your idea is saved. Continue your search without submitting it again.")
+    if st.button("Continue Search", type="primary"):
         submit_pending()
 
 
@@ -312,63 +244,84 @@ def reference_card(run, item, draft):
         st.markdown(f"#### {item['title']}")
         st.caption(f"{item['platform']} / {item['strand']}")
         annotation = draft["annotations"][item_id]
-        borrow = annotation["what_to_borrow"]
         st.markdown("**What to Borrow**")
-        st.write(borrow if len(borrow) <= 240 else borrow[:237].rstrip() + "...")
-        link, select = st.columns(2)
+        st.write(borrow_summary(annotation["what_to_borrow"]))
+        link, select, details = st.columns(3)
         link.link_button("View Original", item["source_url"], width="stretch")
         key = f"pick_{run_id}_{item_id}"
         st.session_state.setdefault(key, item_id in draft["ordered_ids"])
         select.checkbox("Add to Pack", key=key, on_change=select_reference, args=(run_id, item_id, key))
-        with st.expander("Details / Edit"):
-            check = item.get("page_check")
-            if check:
-                st.caption(f"Source page: {check['status']} / {check['reason']}")
-                if check.get("final_url") and check["final_url"] != item["source_url"]:
-                    st.link_button("Checked Destination", check["final_url"], key=f"checked_{item_id}")
-            if item.get("creator"):
-                st.caption(f"Creator: {item['creator']}")
-            if item["tags"]:
-                st.caption(" / ".join(item["tags"]))
-            st.caption(
-                "Source descriptions report evidence; borrowing ideas, route fit and production notes "
-                "are creative interpretations."
-            )
-            for field, label in EDIT_FIELDS.items():
-                edit_key = f"edit_{run_id}_{item_id}_{field}"
-                st.session_state.setdefault(edit_key, annotation[field])
-                st.text_area(
-                    label, key=edit_key, on_change=edit_annotation, args=(run_id, item_id, field, edit_key)
+        details.button(
+            "View Details",
+            key=f"details_{item_id}",
+            width="stretch",
+            on_click=open_detail,
+            args=(run_id, item_id),
+        )
+
+
+@st.dialog("Reference Details", width="large", on_dismiss=close_detail)
+def reference_details(run, item):
+    run_id, item_id = run["id"], item["id"]
+    annotation = draft_for(run)["annotations"][item_id]
+    st.subheader(item["title"])
+    st.caption(f"{item['platform']} / {item['strand']}")
+    if item.get("creator"):
+        st.caption(f"Creator: {item['creator']}")
+    if item["tags"]:
+        st.caption(" / ".join(item["tags"]))
+    st.link_button("View Original", item["source_url"])
+    st.caption("Edits are kept in this browser session. Export your pack to save them.")
+    for field, label in EDIT_FIELDS.items():
+        edit_key = f"edit_{run_id}_{item_id}_{field}"
+        st.session_state.setdefault(edit_key, annotation[field])
+        st.text_area(label, key=edit_key, on_change=edit_annotation, args=(run_id, item_id, field, edit_key))
+    st.markdown("**Rights and usage**")
+    st.write(annotation["rights_note"])
+    thumbnail = item.get("thumbnail")
+    if thumbnail:
+        st.caption(f"Thumbnail source: {thumbnail['source_url']} / Usage: {thumbnail['usage_status']}")
+    with st.expander("Source verification and evidence"):
+        st.caption(
+            "Source descriptions report evidence; borrowing ideas, route fit and production notes "
+            "are creative interpretations."
+        )
+        check = item.get("page_check")
+        if check:
+            st.write(f"Source page: {check['status']} / {check['reason']}")
+            if check.get("final_url") and check["final_url"] != item["source_url"]:
+                st.link_button("Checked Destination", check["final_url"], key=f"checked_{item_id}")
+        st.caption(f"Evidence: {item['verification_status']} / Confidence: {annotation['confidence']}")
+        for evidence in run["evidence"]:
+            if evidence["id"] in item["evidence_ids"]:
+                st.caption(f"{evidence['evidence_type']} / {evidence['retrieved_at']}")
+                st.text(evidence["excerpt"])
+                st.link_button(
+                    "Evidence Source", evidence["source_url"], key=f"source_{item_id}_{evidence['id']}"
                 )
-            st.caption(f"Evidence: {item['verification_status']} / Confidence: {annotation['confidence']}")
-            st.caption(annotation["rights_note"])
-            for assumption in annotation.get("assumptions", []):
-                st.caption(assumption)
-            if thumbnail:
-                st.caption(f"Thumbnail source: {thumbnail['source_url']}")
-            for evidence in run["evidence"]:
-                if evidence["id"] in item["evidence_ids"]:
-                    st.caption(f"{evidence['evidence_type']} / {evidence['retrieved_at']}")
-                    st.text(evidence["excerpt"])
-                    st.link_button(
-                        "Evidence Source",
-                        evidence["source_url"],
-                        key=f"source_{run_id}_{item_id}_{evidence['id']}",
-                    )
-            if item.get("ranking"):
-                rank = item["ranking"]
-                st.caption(f"Recommendation fit: {rank['score']:.0f}/100 / {rank['role'].replace('_', ' ')}")
-                for reason in rank["reasons"]:
-                    st.caption(reason)
-                st.caption(rank["selection_note"])
-            for index, url in enumerate(item.get("alternate_urls", [])):
-                st.link_button("Alternate Source", url, key=f"alternate_{item_id}_{index}")
-            st.button(
-                "Exclude Reference",
-                key=f"exclude_{item_id}",
-                on_click=exclude_reference,
-                args=(run_id, item_id),
-            )
+        for index, url in enumerate(item.get("alternate_urls", [])):
+            st.link_button("Alternate Source", url, key=f"alternate_{item_id}_{index}")
+    with st.expander("Recommendation details and assumptions"):
+        if item.get("ranking"):
+            rank = item["ranking"]
+            st.caption(f"Recommendation fit: {rank['score']:.0f}/100 / {rank['role'].replace('_', ' ')}")
+            for reason in rank["reasons"]:
+                st.write(reason)
+            st.write(rank["selection_note"])
+        for assumption in annotation.get("assumptions", []):
+            st.write(assumption)
+    done, exclude = st.columns(2)
+    if done.button("Done", type="primary", width="stretch"):
+        close_detail()
+        st.rerun()
+    if exclude.button(
+        "Exclude Reference",
+        key=f"exclude_{item_id}",
+        width="stretch",
+        on_click=exclude_from_detail,
+        args=(run_id, item_id),
+    ):
+        st.rerun()
 
 
 def export_pack(run: dict, draft: dict):
@@ -390,26 +343,33 @@ def export_pack(run: dict, draft: dict):
 
 
 def selection_panel(run, draft):
-    st.subheader(f"Your Pack ({len(draft['ordered_ids'])})")
+    st.subheader(f"Your Pack ({len(draft['ordered_ids'])})", anchor="your-pack")
     by_id = {item["id"]: item for item in run["results"]}
     for index, item_id in enumerate(draft["ordered_ids"]):
-        title, up, down, remove = st.columns([6, 1, 1, 1.5])
-        title.write(by_id[item_id]["title"])
-        up.button(
-            "Up",
-            key=f"up_{item_id}",
-            disabled=index == 0,
-            on_click=move_reference,
-            args=(run["id"], item_id, -1),
-        )
-        down.button(
-            "Down",
-            key=f"down_{item_id}",
-            disabled=index == len(draft["ordered_ids"]) - 1,
-            on_click=move_reference,
-            args=(run["id"], item_id, 1),
-        )
-        remove.button("Remove", key=f"remove_{item_id}", on_click=remove_reference, args=(run["id"], item_id))
+        st.write(by_id[item_id]["title"])
+        with st.container(horizontal=True, gap="xxsmall"):
+            st.button(
+                "↑",
+                help="Move up",
+                key=f"up_{item_id}",
+                disabled=index == 0,
+                on_click=move_reference,
+                args=(run["id"], item_id, -1),
+            )
+            st.button(
+                "↓",
+                help="Move down",
+                key=f"down_{item_id}",
+                disabled=index == len(draft["ordered_ids"]) - 1,
+                on_click=move_reference,
+                args=(run["id"], item_id, 1),
+            )
+            st.button(
+                "Remove",
+                key=f"remove_{item_id}",
+                on_click=remove_reference,
+                args=(run["id"], item_id),
+            )
     if not draft["ordered_ids"]:
         st.caption("Add references to build your pack.")
     if st.session_state.get("conflict_run") == run["id"]:
@@ -437,8 +397,10 @@ def selection_panel(run, draft):
         )
 
 
-def result_panel():
+def result_panel(health):
     run = st.session_state["run"]
+    with st.expander("New Search"):
+        brief_form(health)
     if run.get("mode") != "live":
         st.info("This archived demonstration is read-only. Start new research to find current references.")
         return
@@ -451,10 +413,10 @@ def result_panel():
                 "No usable references remained after source checks. Try a different idea or broader sources."
             )
         else:
-            st.error("We could not complete this research. Start new research or check Developer Settings.")
+            st.error("We could not complete this research. Please try a new search.")
         return
     draft = draft_for(run)
-    st.subheader("References")
+    st.subheader("Reference Results")
     st.caption(st.session_state["brief"]["concept"])
     if run["status"] == "partial":
         st.info(f"Found {len(run['results'])} references. Some sources need review or had limited coverage.")
@@ -462,10 +424,7 @@ def result_panel():
         platforms = sorted({item["platform"] for item in run["results"]})
         strands = sorted({item["strand"] for item in run["results"]})
         source_filter = st.multiselect("Source", platforms, key=f"source_filter_{run['id']}")
-        strand_filter = st.multiselect("Creative Strand", strands, key=f"strand_filter_{run['id']}")
-        evidence_filter = st.selectbox(
-            "Evidence", ["All", "Page checked", "Needs review"], key=f"evidence_filter_{run['id']}"
-        )
+        strand_filter = st.multiselect("Creative Category", strands, key=f"strand_filter_{run['id']}")
         if draft.get("rejected_ids"):
             st.caption(f"{len(draft['rejected_ids'])} references excluded.")
             st.button("Restore Excluded References", on_click=restore_excluded, args=(run["id"],))
@@ -475,22 +434,22 @@ def result_panel():
         if item["id"] not in draft.get("rejected_ids", [])
         and (not source_filter or item["platform"] in source_filter)
         and (not strand_filter or item["strand"] in strand_filter)
-        and (
-            evidence_filter == "All"
-            or (item["verification_status"] == "supported") == (evidence_filter == "Page checked")
-        )
     ]
     if not visible:
         st.info("No references match these filters. Adjust the filters or restore excluded references.")
-    columns = st.columns(2)
-    for index, item in enumerate(visible):
-        with columns[index % 2]:
-            reference_card(run, item, draft)
-    st.divider()
-    selection_panel(run, draft)
+    st.html('<a class="rf-pack-shortcut" href="#your-pack">View Your Pack</a>')
+    with st.container(key="research_workspace"):
+        results, pack = st.columns([3, 1], gap="medium")
+        with results:
+            for item in visible:
+                reference_card(run, item, draft)
+        with pack:
+            with st.container(key="pack_panel", border=True):
+                selection_panel(run, draft)
 
 
 def main():
+    st.html(WORKSPACE_STYLE)
     st.title("Reference Finder")
     st.write("Turn your creative idea into a curated reference pack.")
     try:
@@ -503,13 +462,19 @@ def main():
             except APIError:
                 st.query_params.clear()
                 st.warning("That saved research is unavailable. Start a new search below.")
-        sidebar(health)
-        if st.session_state.get("run"):
-            result_panel()
-        elif st.session_state.get("pending_research"):
-            strategy_panel()
+        sidebar()
+        if st.session_state.get("pending_research"):
+            resume_search()
+        elif st.session_state.get("run"):
+            result_panel(health)
         else:
             brief_form(health)
+        detail = st.session_state.get("active_detail")
+        run = st.session_state.get("run")
+        if detail and run and detail[0] == run["id"]:
+            item = next((item for item in run["results"] if item["id"] == detail[1]), None)
+            if item:
+                reference_details(run, item)
     except APIError as error:
         display_error(error)
         if st.button("Retry"):
