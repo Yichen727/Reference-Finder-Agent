@@ -22,7 +22,9 @@ from backend.schemas.models import (
     SelectionInput,
     StoredBrief,
 )
+from backend.services.presentation import PresentationStore
 from backend.services.source_policy import SourcePolicy
+from backend.services.thumbnails import ThumbnailService
 from backend.services.workflow import Workflow
 
 
@@ -30,14 +32,19 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     config = settings or Settings()
     repo = Repository(config.data_dir / "reference_finder.sqlite3")
     workflow = Workflow(config, repo)
+    presentation = PresentationStore(repo)
+    thumbnails = ThumbnailService(config, presentation)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         repo.initialize()
+        presentation.initialize()
         yield
 
     app = FastAPI(title="Atomized Reference Finder", version="0.1.0", lifespan=lifespan)
     app.state.workflow = workflow
+    app.state.thumbnails = thumbnails
+    app.state.presentation = presentation
 
     @app.exception_handler(AppError)
     async def application_error(request: Request, error: AppError):
@@ -155,6 +162,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 "mode": run["mode"],
                 "status": run["status"],
                 "summary": run["strategy"]["summary"][:120],
+                "title": presentation.title(run),
                 "created_at": run["created_at"],
             }
             for run in repo.recent_runs()
@@ -163,6 +171,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.get("/search-runs/{run_id}", response_model=SearchRun)
     def get_run(run_id: UUID):
         return workflow.run(str(run_id))
+
+    @app.get("/search-runs/{run_id}/presentation")
+    def run_presentation(run_id: UUID):
+        run = workflow.run(str(run_id))
+        previews = thumbnails.for_run(run) if run.mode == "live" else {}
+        return {"title": presentation.title(run.model_dump(mode="json")), "previews": previews}
 
     @app.put("/search-runs/{run_id}/selection", response_model=Selection)
     def save_selection(run_id: UUID, value: SelectionInput):

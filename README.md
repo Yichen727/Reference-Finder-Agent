@@ -7,8 +7,8 @@ The workspace provides real external reference discovery:
 
 1. Describe your creative idea and click **Find References**.
 2. The app generates a strategy and starts searching automatically.
-3. Browse up to 15 compact references on the left and choose **Add to Pack**.
-4. Review your pack, reorder with **Up / Down**, or remove a reference.
+3. Browse up to 15 visual references in the centre and open **View Details** for the existing analysis.
+4. Choose **Add to Pack**, drag selected items into order, or remove a reference with its row's **×** button.
 5. Click **Export Reference Pack** to save the latest edits and prepare a DOCX download.
 
 Search uses OpenAI Web Search. It records source citations, coverage, timestamps and
@@ -26,27 +26,56 @@ contains only **Sources**, **Reference Count** and **Creative Constraints**. The
 planning model interprets audience, format, tone and purpose from the idea; optional Brief
 fields remain supported by the API. Search strategy generation runs automatically.
 
-Results use a 75/25 workspace: **Reference Results** on the left and **Your Pack** on the
-right. The pack stays visible while scrolling on wide screens and scrolls independently
+The three panels are the left research sidebar, centre **Reference Results**, and right
+**Your Pack**. Results occupy 70% of the main workspace and the pack 30%, leaving room
+for a two-column card grid. The pack stays visible while scrolling on wide screens and scrolls independently
 when long. At viewport widths of 1100px or less, panels stack with a **View Your Pack**
-shortcut. **New Search** above the results opens the same simple search form. Earlier
-research drafts remain available when navigating back to those records.
+shortcut; cards also stack on phone-sized screens. Start another search with **New Research**
+in the sidebar. Earlier research drafts remain available when navigating back to those records.
 
 Cards show the work title, source, creative strand, a short **What to Borrow**, **View Original**
 and **Add to Pack**. The summary contains at most two sentences. **View Details** opens a
-single-reference dialog containing full annotation editors, production observations,
-evidence, page status, ranking reasons, alternate sources, assumptions and usage notes.
-Rights information is directly visible in the dialog; evidence and ranking details have
-their own expanders. Closing the dialog retains draft edits. Editors are created only for
-the open reference. The collapsed **Filter Results** section filters sources and creative
+read-only report: **What It Is**, **What to Borrow**, **Why It Fits Your Brief**, and
+**Production Considerations**. It shows the preview, title, creator and source, with
+**View Original** and **Add to Pack / Remove from Pack** actions. Source evidence,
+verification and rights remain in a collapsed section. Opening details uses data already
+loaded in the session: it makes no additional backend, preview or AI requests.
+The collapsed **Filter Results** section filters sources and creative
 categories. **Exclude Reference** in the dialog removes a candidate from browsing and the pack;
 **Restore Excluded References** brings it back. Filters never deselect hidden references
 or discard annotation edits. Export saves explicit exclusions with the selection.
-Images appear only when thumbnail
-metadata explicitly confirms an approved usage status and availability; there is a text-only
-fallback and no automatic image invention or collection.
+Cards always reserve a 16:9 preview area, preserving the full image with letterboxing.
+YouTube and Vimeo covers come from their official oEmbed responses. Website `og:image`
+is displayed only with an image-specific supported Creative Commons license or explicit
+administrator permission for that source domain. Previously approved thumbnail metadata
+is also supported. Unavailable, restricted, unsafe or unlicensed previews use a clean
+placeholder; image URLs are never guessed. oEmbed HTML is not executed. Preview use does
+not establish permission to reproduce the work in exported decks.
 
-The sidebar contains **New Research**, **Recent Research** and **Open Research**.
+Preview retrieval checks robots rules, public DNS/IP destinations and every redirect,
+uses bounded unauthenticated requests, and validates raster type, dimensions and size.
+Validated bytes are cached separately in SQLite for up to 24 hours; unavailable previews
+are cached for an hour. Results are still browsable if enrichment fails. The search,
+evidence, ranking and saved research schemas are unchanged.
+
+For websites where permission has actually been obtained, administrators may set the
+backend-only environment variable `PREVIEW_APPROVED_DOMAINS` to a JSON list of exact
+source domains. The default is `[]`; merely finding `og:image` is not permission.
+Provider metadata follows the [oEmbed specification](https://oembed.com/) and
+[Vimeo's official guidance](https://help.vimeo.com/hc/en-us/articles/12427952430481-Overview-oEmbed).
+
+The sidebar contains **New Research** and a clickable **Recent Research** list. The
+active record is highlighted. A 3–6 word extractive title is generated from the original
+prompt once and stored separately from the research record, including for older records.
+Naming uses no additional OpenAI calls. There is no selectbox or separate Open action.
+
+The pack uses a small offline [Streamlit v2 component](https://docs.streamlit.io/develop/concepts/custom-components/components-v2)
+with a drag handle, title and Remove action in each row. No external JavaScript service
+or sorting dependency is required. Drag with a pointer or touch, or focus the handle
+and use Arrow Up/Down. Actions carry unique reference IDs and a draft revision; stale
+events or invalid permutations cannot silently change the selected set. Duplicate titles
+remain independent. Selection changes invalidate an old export download.
+
 Developer diagnostics are separate from the user interface: use the backend's `/health`,
 research JSON and interactive `/docs` endpoints for configuration, coverage and usage checks.
 
@@ -256,9 +285,10 @@ The check saves an isolated SQLite run, `result.json` and DOCX under
 - References start unselected; the creative lead makes the final choice.
 - Export automatically saves selection, ordering and annotation edits before generating
   the DOCX. There is no separate manual-save step.
-- Use **Up / Down** in **Your Pack** to reorder, or **Remove** to deselect a reference.
+- Drag handles in **Your Pack** to reorder, or use each row's **×** to deselect a reference.
 - Draft edits survive Streamlit reruns and navigation between research records in the same
-  browser session. Export persists them to SQLite; unsaved browser drafts do not survive a
+  browser session. Existing annotation overrides from older research remain intact; this
+  interface presents them read-only. Export persists drafts to SQLite; unsaved drafts do not survive a
   fresh browser session.
 - Run URLs include `?run=<id>` so a fresh session can restore saved state.
 - SQLite records are saved to `data/reference_finder.sqlite3`; documents are saved to
@@ -292,6 +322,7 @@ are later phases.
 | POST | `/search-runs` | Submit an idempotent external-search run |
 | GET | `/search-runs` | List the 30 most recent runs |
 | GET | `/search-runs/{id}` | Read status, results, evidence and saved selection |
+| GET | `/search-runs/{id}/presentation` | Persisted title and cached, validated previews; no AI calls |
 | PUT | `/search-runs/{id}/selection` | Save order and annotations with version checks |
 | POST | `/search-runs/{id}/exports/docx` | Export the saved selection; optional expected-version check |
 | GET | `/exports/{id}/download` | Download a generated DOCX |
@@ -312,7 +343,7 @@ Tests cover the API workflow, result cap, invalid selections, idempotency, resta
 recovery, edited and ordered DOCX contents, clickable hyperlink relationships,
 sanitized provider failures, Streamlit curation, download preparation and fresh-session
 restoration, grounded source IDs, domain filtering, bounded retries, partial success and
-one-click search, simplified options, on-demand detail editors, navigation-safe drafts, Up/Down ordering,
+one-click search, simplified options, read-only details without API requests, navigation-safe drafts, ID ordering,
 automatic save/export, late version conflicts, retries, DNS pinning/private redirects,
 robots restrictions, bounded downloads, work merging, ranking and filtered/excluded drafts.
 Normal tests use a test-only
@@ -320,22 +351,40 @@ provider and API test doubles; these are not runtime modes and do not spend API 
 DOCX content is checked programmatically; visual review in Microsoft Word
 belongs to the full export acceptance phase.
 
+For browser acceptance on Windows with Google Chrome installed:
+
+```powershell
+.\.venv\Scripts\python.exe scripts/verify_ui.py
+```
+
+This starts hidden Chrome and isolated test services on ports 8100/8601, tests real pointer
+dragging, row removal, duplicate titles, DOCX order, history navigation and desktop/narrow
+layouts, then stops its own processes. It uses labelled test previews and a separate database;
+it makes no OpenAI calls and does not change user research. Screenshots and the report are
+written under Git-ignored `data/ui-review/`. The verified environment provides `websockets`
+through Streamlit's locked dependencies.
+
 ## Layout
 
 ```text
 frontend/                  Streamlit interface and HTTP client
 frontend/curation.py        Durable browser draft and selection helpers
 frontend/layout.py          Scoped responsive layout and compact summary helpers
+frontend/pack_component.py  Native Streamlit component registration
+frontend/pack_assets/       Offline drag, keyboard and remove controls
 backend/main.py            FastAPI application and routes
 backend/core/              Settings and safe application errors
 backend/schemas/           Pydantic contracts and reference limits
 backend/providers/         Provider interface and OpenAI search adapter
 config/sources.json        Source categories, domains and coverage policies
 scripts/verify_live.py     Explicit live search and DOCX verification
+scripts/verify_ui.py       Isolated Chrome UI and DOCX order acceptance
 backend/repositories/      SQLite storage and atomic submission deduplication
 backend/services/          Workflow, selection validation and DOCX export
 backend/services/page_verification.py  Safe public-text and access checks
 backend/services/ranking.py            Work merging and diverse recommendation ranking
+backend/services/presentation.py       Persisted sidebar titles and preview cache
+backend/services/thumbnails.py         Safe official metadata and image retrieval
 prompts/                   Versioned research-planning prompt
 tests/                     API, provider and Streamlit integration tests
 run.py                     Local two-service launcher

@@ -1,12 +1,12 @@
-"""Keep editable pack drafts separate from Streamlit's transient widget state."""
+"""Keep pack drafts separate from Streamlit's transient widget state."""
 
 import copy
 
 EDIT_FIELDS = {
-    "what_it_is": "What it is",
+    "what_it_is": "What It Is",
     "what_to_borrow": "What to Borrow",
-    "why_it_fits": "Why it supports this idea",
-    "production_note": "Production notes",
+    "why_it_fits": "Why It Fits Your Brief",
+    "production_note": "Production Considerations",
 }
 
 
@@ -36,3 +36,23 @@ def selection_payload(draft: dict) -> dict:
         "rejection_notes": draft["rejection_notes"],
         "rejected_ids": list(draft.get("rejected_ids", [])),
     }
+
+
+def apply_pack_action(draft: dict, action: dict) -> bool:
+    """Accept ID-based permutations or one explicit removal from the current revision."""
+    if not isinstance(action, dict) or action.get("revision") != draft["revision"]:
+        return False
+    current = draft["ordered_ids"]
+    order = action.get("ordered_ids")
+    if not isinstance(order, list) or not all(isinstance(item, str) for item in order):
+        return False
+    if len(order) != len(set(order)):
+        return False
+    removed = action.get("removed_id")
+    expected = set(current) - {removed} if removed in current else set(current)
+    if set(order) != expected or (removed is not None and removed not in current):
+        return False
+    if order == current:
+        return False
+    draft["ordered_ids"] = list(order)
+    return True

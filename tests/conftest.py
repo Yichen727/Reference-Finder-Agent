@@ -15,6 +15,7 @@ def settings(tmp_path):
 def client(settings):
     with TestClient(create_app(settings)) as instance:
         instance.app.state.workflow.provider = FixtureProvider()
+        instance.app.state.thumbnails.for_run = lambda run: {}
         yield instance
 
 

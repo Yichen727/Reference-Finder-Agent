@@ -82,10 +82,22 @@ def details(app, item):
 
 
 def edit_borrow(app, run, item, value):
-    details(app, item)
-    widget(app.text_area, f"edit_{run['id']}_{item['id']}_what_to_borrow").input(value).run()
-    button(app, "Done").click().run()
+    # Simulate an existing unsaved draft from the previous editable interface.
+    draft = app.session_state["pack_drafts"][run["id"]]
+    draft["annotations"][item["id"]]["what_to_borrow"] = value
+    draft["revision"] += 1
+    app.run()
     assert not app.exception
+
+
+def reorder(app, run, ids):
+    from frontend.curation import apply_pack_action
+
+    draft = app.session_state["pack_drafts"][run["id"]]
+    assert apply_pack_action(draft, {"ordered_ids": ids, "revision": draft["revision"]})
+    draft["revision"] += 1
+    app.session_state["pack_downloads"].pop(run["id"], None)
+    app.run()
 
 
 def test_home_is_simple_and_defaults_launch_with_one_click(bridge, client):
@@ -116,10 +128,9 @@ def test_export_automatically_saves_latest_order_and_annotations(bridge, client)
     pick(app, run, 0)
     pick(app, run, 1)
     edit_borrow(app, run, first, "My revised creative principle")
-    widget(app.button, f"down_{first['id']}").click().run()
+    reorder(app, run, [second["id"], first["id"]])
     assert app.session_state["pack_drafts"][run["id"]]["ordered_ids"] == [second["id"], first["id"]]
-    widget(app.button, f"up_{first['id']}").click().run()
-    widget(app.button, f"down_{first['id']}").click().run()
+    assert not any((item.key or "").startswith(("up_", "down_")) for item in app.button)
     assert not any("Save selection" in item.label for item in app.button)
     button(app, "Export Reference Pack").click().run()
     assert not app.exception
@@ -146,19 +157,18 @@ def test_remove_and_navigation_preserve_unsaved_annotation_drafts(bridge):
     pick(app, run, 0)
     pick(app, run, 1)
     edit_borrow(app, run, first, "Keep this draft across navigation")
-    widget(app.button, f"remove_{second['id']}").click().run()
+    details(app, second)
+    button(app, "Remove from Pack").click().run()
+    button(app, "Done").click().run()
     assert not widget(app.checkbox, f"pick_{run['id']}_{second['id']}").value
     button(app, "New Research").click().run()
     launch(app, concept="A different idea")
-    next(item for item in app.selectbox if item.label == "Recent Research").set_value(run["id"]).run()
-    button(app, "Open Research").click().run()
+    widget(app.button, f"research_{run['id']}").click().run()
     assert app.session_state["run_id"] == run["id"]
     assert widget(app.checkbox, f"pick_{run['id']}_{first['id']}").value
     details(app, first)
-    assert (
-        widget(app.text_area, f"edit_{run['id']}_{first['id']}_what_to_borrow").value
-        == "Keep this draft across navigation"
-    )
+    assert any(item.value == "Keep this draft across navigation" for item in app.markdown)
+    assert not app.text_area
 
 
 def test_search_options_only_expose_sources_count_and_constraints(bridge, client):
@@ -257,7 +267,6 @@ def test_filters_preserve_hidden_selections_and_annotation_edits(bridge, client)
     record = restored.session_state["run"]
     first = record["results"][0]
     pick(restored, record, 0)
-    edit_key = f"edit_{run.id}_{first['id']}_what_to_borrow"
     edit_borrow(restored, record, first, "Preserve this annotation through filters")
     widget(restored.multiselect, f"source_filter_{run.id}").set_value(["YouTube"]).run()
     assert len(restored.checkbox) == 1
@@ -265,7 +274,7 @@ def test_filters_preserve_hidden_selections_and_annotation_edits(bridge, client)
     widget(restored.multiselect, f"source_filter_{run.id}").set_value([]).run()
     assert widget(restored.checkbox, f"pick_{run.id}_{first['id']}").value
     details(restored, first)
-    assert widget(restored.text_area, edit_key).value == "Preserve this annotation through filters"
+    assert any(item.value == "Preserve this annotation through filters" for item in restored.markdown)
     button(restored, "Done").click().run()
     widget(restored.multiselect, f"strand_filter_{run.id}").set_value(["Execution"]).run()
     assert len(restored.checkbox) == 1
@@ -290,7 +299,7 @@ def test_exclusions_are_saved_with_the_pack_and_can_be_restored(bridge, client):
     assert not widget(app.checkbox, f"pick_{run['id']}_{second['id']}").value
 
 
-def test_only_available_approved_thumbnails_are_rendered(bridge, client, monkeypatch):
+def test_only_backend_validated_preview_bytes_are_rendered(bridge, client):
     app = launch(open_app())
     run = SearchRun.model_validate(app.session_state["run"])
     for index, item in enumerate(run.results):
@@ -301,13 +310,22 @@ def test_only_available_approved_thumbnails_are_rendered(bridge, client, monkeyp
             available=index == 0,
         )
     client.app.state.workflow.repository.put("run", run)
-    shown = []
-    monkeypatch.setattr("streamlit.image", lambda url, **kwargs: shown.append(url))
+    client.app.state.thumbnails.for_run = lambda run: {
+        run.results[0].id: {
+            "image": "data:image/png;base64,aGVsbG8=",
+            "basis": "Test fixture",
+            "source_url": "https://studio.test/image.png",
+        },
+        run.results[1].id: {"image": "javascript:alert(1)"},
+    }
     restored = AppTest.from_file(str(APP), default_timeout=15)
     restored.query_params["run"] = run.id
     restored.run()
     assert not restored.exception
-    assert shown == [str(run.results[0].thumbnail.url)]
+    from frontend.layout import preview_markup
+
+    assert "<img" in preview_markup({"image": "data:image/png;base64,aGVsbG8="}, "Reference")
+    assert "<img" not in preview_markup({"image": "javascript:alert(1)"}, "Reference")
 
 
 def test_frontend_handles_backend_unavailable(monkeypatch):
@@ -320,21 +338,25 @@ def test_frontend_handles_backend_unavailable(monkeypatch):
     assert button(app, "Retry")
 
 
-def test_cards_only_render_editors_for_the_open_reference(bridge):
+def test_details_are_read_only_and_open_without_any_api_calls(bridge):
     app = launch(open_app())
     run = app.session_state["run"]
-    first, second = run["results"][:2]
-    assert not [item for item in app.text_area if (item.key or "").startswith("edit_")]
-    assert not any(item.label == "Details / Edit" for item in app.expander)
+    first = run["results"][0]
+    assert not app.text_area
+    assert not any(item.label == "New Search" for item in app.expander)
+    calls = list(bridge["requests"])
     details(app, first)
-    editors = [item for item in app.text_area if (item.key or "").startswith("edit_")]
-    assert len(editors) == 4
-    assert all(first["id"] in item.key for item in editors)
-    assert any(item.value == "**Rights and usage**" for item in app.markdown)
+    assert bridge["requests"] == calls
+    assert not app.text_area and not app.text_input
+    for label in ["What It Is", "What to Borrow", "Why It Fits Your Brief", "Production Considerations"]:
+        assert any(item.value == f"**{label}**" for item in app.markdown)
+    evidence = next(item for item in app.expander if item.label == "Source Evidence, Verification and Rights")
+    assert not evidence.proto.expanded
+    button(app, "Add to Pack").click().run()
+    assert first["id"] in app.session_state["pack_drafts"][run["id"]]["ordered_ids"]
+    assert bridge["requests"] == calls
     button(app, "Done").click().run()
-    assert not [item for item in app.text_area if (item.key or "").startswith("edit_")]
-    details(app, second)
-    assert all(second["id"] in item.key for item in app.text_area if (item.key or "").startswith("edit_"))
+    assert not app.text_area
 
 
 def test_borrow_summary_is_short_without_changing_the_annotation():
@@ -345,12 +367,13 @@ def test_borrow_summary_is_short_without_changing_the_annotation():
     assert len(borrow_summary("An extended creative idea " * 50)) <= 280
 
 
-def test_new_search_from_results_preserves_previous_drafts_and_retry_key(bridge, client):
+def test_sidebar_research_navigation_preserves_previous_drafts_and_retry_key(bridge, client):
     app = launch(open_app())
     original = app.session_state["run"]
     pick(app, original, 0)
     edit_borrow(app, original, original["results"][0], "Keep the first research draft")
-    assert any(item.label == "New Search" for item in app.expander)
+    assert not any(item.label == "New Search" for item in app.expander)
+    button(app, "New Research").click().run()
     bridge["lose_submission"] = True
     launch(app, concept="Another idea, submitted directly from results")
     assert app.error and len(client.get("/search-runs").json()) == 2
@@ -359,8 +382,7 @@ def test_new_search_from_results_preserves_previous_drafts_and_retry_key(bridge,
     assert not app.exception
     assert app.session_state["run_id"] != original["id"]
     assert len(client.get("/search-runs").json()) == 2
-    next(item for item in app.selectbox if item.label == "Recent Research").set_value(original["id"]).run()
-    button(app, "Open Research").click().run()
+    widget(app.button, f"research_{original['id']}").click().run()
     draft = app.session_state["pack_drafts"][original["id"]]
     assert draft["ordered_ids"] == [original["results"][0]["id"]]
     assert (

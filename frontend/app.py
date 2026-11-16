@@ -3,8 +3,9 @@ from uuid import uuid4
 import streamlit as st
 
 from frontend.api_client import APIClient, APIError
-from frontend.curation import EDIT_FIELDS, draft_from_run, selection_payload
-from frontend.layout import WORKSPACE_STYLE, borrow_summary
+from frontend.curation import EDIT_FIELDS, apply_pack_action, draft_from_run, selection_payload
+from frontend.layout import WORKSPACE_STYLE, borrow_summary, preview_markup
+from frontend.pack_component import pack_list
 
 SOURCES = [
     "Vimeo",
@@ -43,24 +44,27 @@ def select_reference(run_id: str, item_id: str, key: str):
     changed(run_id)
 
 
-def edit_annotation(run_id: str, item_id: str, field: str, key: str):
-    st.session_state["pack_drafts"][run_id]["annotations"][item_id][field] = st.session_state[key]
-    changed(run_id)
-
-
-def move_reference(run_id: str, item_id: str, offset: int):
-    order = st.session_state["pack_drafts"][run_id]["ordered_ids"]
-    index = order.index(item_id)
-    other = index + offset
-    if 0 <= other < len(order):
-        order[index], order[other] = order[other], order[index]
-        changed(run_id)
-
-
 def remove_reference(run_id: str, item_id: str):
     st.session_state["pack_drafts"][run_id]["ordered_ids"].remove(item_id)
     st.session_state[f"pick_{run_id}_{item_id}"] = False
     changed(run_id)
+
+
+def toggle_reference(run_id: str, item_id: str):
+    key = f"pick_{run_id}_{item_id}"
+    order = st.session_state["pack_drafts"][run_id]["ordered_ids"]
+    st.session_state[key] = item_id not in order
+    select_reference(run_id, item_id, key)
+
+
+def pack_action(run_id: str, key: str):
+    action = st.session_state.get(key, {}).get("action")
+    draft = st.session_state["pack_drafts"][run_id]
+    before = set(draft["ordered_ids"])
+    if apply_pack_action(draft, action):
+        for item_id in before - set(draft["ordered_ids"]):
+            st.session_state[f"pick_{run_id}_{item_id}"] = False
+        changed(run_id)
 
 
 def exclude_reference(run_id: str, item_id: str):
@@ -103,6 +107,7 @@ def activate_run(run_id: str, *, reload_saved=False):
         st.session_state.setdefault("pack_downloads", {}).pop(run_id, None)
         st.session_state.pop("conflict_run", None)
     st.session_state.update(run_id=run_id, run=run, brief=brief)
+    st.session_state["recent_runs"] = client.request("GET", "/search-runs")
     close_detail()
     st.session_state.pop("pending_research", None)
     st.query_params["run"] = run_id
@@ -113,6 +118,8 @@ def new_research():
     for key in ["run_id", "run", "brief", "pending_research", "last_error"]:
         st.session_state.pop(key, None)
     st.query_params.clear()
+    st.session_state.pop("workspace_health", None)
+    st.session_state.pop("recent_runs", None)
 
 
 def display_error(error: APIError):
@@ -136,14 +143,25 @@ def sidebar():
     with st.sidebar:
         st.caption("ATOMIZED STUDIOS")
         st.button("New Research", on_click=new_research, width="stretch")
-        recent = client.request("GET", "/search-runs")
+        if "recent_runs" not in st.session_state:
+            st.session_state["recent_runs"] = client.request("GET", "/search-runs")
+        recent = st.session_state["recent_runs"]
         recent = [item for item in recent if item.get("mode") == "live"]
+        st.caption("RECENT RESEARCH")
         if recent:
-            options = {item["id"]: f"{item['summary'][:48]} / {item['created_at'][:10]}" for item in recent}
-            selected = st.selectbox("Recent Research", list(options), format_func=options.get)
-            if st.button("Open Research", width="stretch"):
-                activate_run(selected)
-                st.rerun()
+            with st.container(key="recent_research"):
+                for item in recent:
+                    active = item["id"] == st.session_state.get("run_id")
+                    title = item.get("title") or item["summary"][:48]
+                    if st.button(
+                        title,
+                        key=f"research_{item['id']}",
+                        width="stretch",
+                        type="primary" if active else "tertiary",
+                        help=f"{title} · {item['created_at'][:10]}",
+                    ):
+                        activate_run(item["id"])
+                        st.rerun()
         else:
             st.caption("No saved research yet.")
 
@@ -235,53 +253,64 @@ def poll_run(run_id):
         display_error(error)
 
 
-def reference_card(run, item, draft):
+def presentation_for(run):
+    presentations = st.session_state.setdefault("presentations", {})
+    if run["id"] not in presentations:
+        try:
+            presentations[run["id"]] = client.request("GET", f"/search-runs/{run['id']}/presentation")
+        except APIError:
+            # Preview enrichment never prevents browsing an existing result or exporting it.
+            presentations[run["id"]] = {"previews": {}}
+    return presentations[run["id"]]
+
+
+def reference_card(run, item, draft, previews):
     run_id, item_id = run["id"], item["id"]
-    with st.container(border=True):
-        thumbnail = item.get("thumbnail")
-        if thumbnail and thumbnail.get("usage_status") == "approved" and thumbnail.get("available") is True:
-            st.image(thumbnail["url"], width="stretch")
+    with st.container(border=True, key=f"reference_card_{item_id}"):
+        st.html(preview_markup(previews.get(item_id), item["title"]))
         st.markdown(f"#### {item['title']}")
         st.caption(f"{item['platform']} / {item['strand']}")
         annotation = draft["annotations"][item_id]
-        st.markdown("**What to Borrow**")
-        st.write(borrow_summary(annotation["what_to_borrow"]))
-        link, select, details = st.columns(3)
-        link.link_button("View Original", item["source_url"], width="stretch")
-        key = f"pick_{run_id}_{item_id}"
-        st.session_state.setdefault(key, item_id in draft["ordered_ids"])
-        select.checkbox("Add to Pack", key=key, on_change=select_reference, args=(run_id, item_id, key))
-        details.button(
-            "View Details",
-            key=f"details_{item_id}",
-            width="stretch",
-            on_click=open_detail,
-            args=(run_id, item_id),
-        )
+        st.markdown("**What to Borrow:** " + borrow_summary(annotation["what_to_borrow"]))
+        with st.container(horizontal=True, gap="xxsmall", vertical_alignment="center"):
+            st.link_button("View Original", item["source_url"])
+            key = f"pick_{run_id}_{item_id}"
+            st.session_state.setdefault(key, item_id in draft["ordered_ids"])
+            st.checkbox("Add to Pack", key=key, on_change=select_reference, args=(run_id, item_id, key))
+            st.button("View Details", key=f"details_{item_id}", on_click=open_detail, args=(run_id, item_id))
 
 
-@st.dialog("Reference Details", width="large", on_dismiss=close_detail)
+@st.dialog("Reference Details", width="medium", on_dismiss=close_detail)
 def reference_details(run, item):
     run_id, item_id = run["id"], item["id"]
     annotation = draft_for(run)["annotations"][item_id]
+    preview = st.session_state.get("presentations", {}).get(run_id, {}).get("previews", {}).get(item_id)
     st.subheader(item["title"])
     st.caption(f"{item['platform']} / {item['strand']}")
-    if item.get("creator"):
-        st.caption(f"Creator: {item['creator']}")
-    if item["tags"]:
-        st.caption(" / ".join(item["tags"]))
-    st.link_button("View Original", item["source_url"])
-    st.caption("Edits are kept in this browser session. Export your pack to save them.")
+    st.caption(f"Creator: {item.get('creator') or 'Not listed'}")
+    st.html(preview_markup(preview, item["title"]))
+    original, selection = st.columns(2)
+    original.link_button("View Original", item["source_url"], width="stretch")
+    selected = item_id in draft_for(run)["ordered_ids"]
+    if selection.button(
+        "Remove from Pack" if selected else "Add to Pack",
+        key=f"detail_select_{item_id}",
+        width="stretch",
+        on_click=toggle_reference,
+        args=(run_id, item_id),
+    ):
+        st.rerun()
     for field, label in EDIT_FIELDS.items():
-        edit_key = f"edit_{run_id}_{item_id}_{field}"
-        st.session_state.setdefault(edit_key, annotation[field])
-        st.text_area(label, key=edit_key, on_change=edit_annotation, args=(run_id, item_id, field, edit_key))
-    st.markdown("**Rights and usage**")
-    st.write(annotation["rights_note"])
-    thumbnail = item.get("thumbnail")
-    if thumbnail:
-        st.caption(f"Thumbnail source: {thumbnail['source_url']} / Usage: {thumbnail['usage_status']}")
-    with st.expander("Source verification and evidence"):
+        st.markdown(f"**{label}**")
+        st.write(annotation[field])
+    with st.expander("Source Evidence, Verification and Rights"):
+        st.markdown("**Rights and usage**")
+        st.write(annotation["rights_note"])
+        if preview and preview.get("image"):
+            st.caption(
+                preview["basis"] + ". Preview use does not establish video or image reproduction rights."
+            )
+            st.link_button("Thumbnail Source", preview["source_url"])
         st.caption(
             "Source descriptions report evidence; borrowing ideas, route fit and production notes "
             "are creative interpretations."
@@ -345,31 +374,16 @@ def export_pack(run: dict, draft: dict):
 def selection_panel(run, draft):
     st.subheader(f"Your Pack ({len(draft['ordered_ids'])})", anchor="your-pack")
     by_id = {item["id"]: item for item in run["results"]}
-    for index, item_id in enumerate(draft["ordered_ids"]):
-        st.write(by_id[item_id]["title"])
-        with st.container(horizontal=True, gap="xxsmall"):
-            st.button(
-                "↑",
-                help="Move up",
-                key=f"up_{item_id}",
-                disabled=index == 0,
-                on_click=move_reference,
-                args=(run["id"], item_id, -1),
-            )
-            st.button(
-                "↓",
-                help="Move down",
-                key=f"down_{item_id}",
-                disabled=index == len(draft["ordered_ids"]) - 1,
-                on_click=move_reference,
-                args=(run["id"], item_id, 1),
-            )
-            st.button(
-                "Remove",
-                key=f"remove_{item_id}",
-                on_click=remove_reference,
-                args=(run["id"], item_id),
-            )
+    st.caption("Drag to reorder")
+    key = f"pack_sort_{run['id']}"
+    pack_list(
+        data={
+            "items": [{"id": item_id, "title": by_id[item_id]["title"]} for item_id in draft["ordered_ids"]],
+            "revision": draft["revision"],
+        },
+        key=key,
+        on_action_change=lambda: pack_action(run["id"], key),
+    )
     if not draft["ordered_ids"]:
         st.caption("Add references to build your pack.")
     if st.session_state.get("conflict_run") == run["id"]:
@@ -383,6 +397,7 @@ def selection_panel(run, draft):
         "Export Reference Pack",
         type="secondary" if download else "primary",
         disabled=not draft["ordered_ids"],
+        width="stretch",
     ):
         with st.spinner("Preparing your document..."):
             export_pack(run, draft)
@@ -394,13 +409,12 @@ def selection_panel(run, draft):
             type="primary",
             file_name=f"Atomized-Reference-Pack-{run['id'][:8]}.docx",
             mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            width="stretch",
         )
 
 
-def result_panel(health):
+def result_panel():
     run = st.session_state["run"]
-    with st.expander("New Search"):
-        brief_form(health)
     if run.get("mode") != "live":
         st.info("This archived demonstration is read-only. Start new research to find current references.")
         return
@@ -416,11 +430,10 @@ def result_panel(health):
             st.error("We could not complete this research. Please try a new search.")
         return
     draft = draft_for(run)
-    st.subheader("Reference Results")
-    st.caption(st.session_state["brief"]["concept"])
+    presentation = presentation_for(run)
     if run["status"] == "partial":
         st.info(f"Found {len(run['results'])} references. Some sources need review or had limited coverage.")
-    with st.expander("Filter Results"):
+    with st.expander("Filter Results", expanded=False):
         platforms = sorted({item["platform"] for item in run["results"]})
         strands = sorted({item["strand"] for item in run["results"]})
         source_filter = st.multiselect("Source", platforms, key=f"source_filter_{run['id']}")
@@ -439,10 +452,18 @@ def result_panel(health):
         st.info("No references match these filters. Adjust the filters or restore excluded references.")
     st.html('<a class="rf-pack-shortcut" href="#your-pack">View Your Pack</a>')
     with st.container(key="research_workspace"):
-        results, pack = st.columns([3, 1], gap="medium")
+        results, pack = st.columns([7, 3], gap="medium")
         with results:
-            for item in visible:
-                reference_card(run, item, draft)
+            heading, count = st.columns([3, 1])
+            heading.subheader("Reference Results")
+            count.caption(f"{len(visible)} Results")
+            st.caption(st.session_state["brief"]["concept"])
+            for start in range(0, len(visible), 2):
+                with st.container(key=f"reference_grid_{start}"):
+                    columns = st.columns(2, gap="small")
+                    for column, item in zip(columns, visible[start : start + 2]):
+                        with column:
+                            reference_card(run, item, draft, presentation["previews"])
         with pack:
             with st.container(key="pack_panel", border=True):
                 selection_panel(run, draft)
@@ -450,10 +471,10 @@ def result_panel(health):
 
 def main():
     st.html(WORKSPACE_STYLE)
-    st.title("Reference Finder")
-    st.write("Turn your creative idea into a curated reference pack.")
     try:
-        health = client.request("GET", "/health")
+        if "workspace_health" not in st.session_state:
+            st.session_state["workspace_health"] = client.request("GET", "/health")
+        health = st.session_state["workspace_health"]
         if "mode" not in health or "max_references" not in health:
             raise APIError("This service is not the Reference Finder backend.")
         if not st.session_state.get("run_id") and st.query_params.get("run"):
@@ -466,8 +487,10 @@ def main():
         if st.session_state.get("pending_research"):
             resume_search()
         elif st.session_state.get("run"):
-            result_panel(health)
+            result_panel()
         else:
+            st.title("Reference Finder")
+            st.write("Turn your creative idea into a curated reference pack.")
             brief_form(health)
         detail = st.session_state.get("active_detail")
         run = st.session_state.get("run")
