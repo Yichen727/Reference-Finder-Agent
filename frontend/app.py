@@ -146,6 +146,11 @@ def display_error(error: APIError):
         st.error("The search service has reached its usage limit. Please try again later.")
     elif error.code == "validation_error":
         st.error("Please check your entries and try again.")
+    elif error.status == 405:
+        st.error(
+            "This action requires the latest backend. Restart the workspace, then try again. "
+            "Your current edits are kept until you restart. Export your pack first to save them."
+        )
     elif error.status == 409:
         st.error(str(error).split(" (")[0])
     else:

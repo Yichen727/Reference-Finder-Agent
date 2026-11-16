@@ -30,6 +30,10 @@ def bridge(client, monkeypatch):
 
     def request(self, method, path, payload=None, *, binary=False):
         state["requests"].append((method, path, copy.deepcopy(payload)))
+        if method in {"DELETE", "PATCH"} and state.get("stale_backend"):
+            raise APIError(
+                "This HTTP method is not supported for this endpoint.", code="http_error", status=405
+            )
         if (method == "DELETE" and state.get("fail_delete")) or (
             method == "PATCH" and state.get("fail_rename")
         ):
@@ -517,6 +521,22 @@ def test_management_failure_preserves_current_research_and_unsaved_pack(bridge, 
         button(app, "Delete Research").click().run()
     assert not app.exception and app.error
     assert app.session_state["run_id"] == run["id"]
+    assert app.session_state["pack_drafts"][run["id"]] == before
+    assert client.get(f"/search-runs/{run['id']}").status_code == 200
+    button(app, "Cancel").click().run()
+    assert not app.exception and selected(app, run, 0)
+
+
+def test_old_backend_explains_restart_and_preserves_failed_delete_draft(bridge, client):
+    app = launch(open_app())
+    run = app.session_state["run"]
+    pick(app, run, 0)
+    before = copy.deepcopy(app.session_state["pack_drafts"][run["id"]])
+    bridge["stale_backend"] = True
+    widget(app.button, f"delete_{run['id']}").click().run()
+    button(app, "Delete Research").click().run()
+    assert not app.exception
+    assert any("latest backend" in item.value and "Restart the workspace" in item.value for item in app.error)
     assert app.session_state["pack_drafts"][run["id"]] == before
     assert client.get(f"/search-runs/{run['id']}").status_code == 200
     button(app, "Cancel").click().run()
