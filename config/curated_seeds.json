@@ -1,0 +1,75 @@
+{
+  "Video & Film": [],
+  "Awards & Winning Work": [
+    {
+      "url": "https://www.canneslions.com/awards/winners-spotlight",
+      "purpose": "Discover named award entries, then locate individual work pages and original sources. This spotlight is not a final reference.",
+      "enabled": true
+    },
+    {
+      "url": "https://www.outbrain.com/blog/best-cannes-lions-winners/",
+      "purpose": "Identify potential campaign leads in a recommended awards roundup; verify each work and any award claims against original or official evidence.",
+      "enabled": true
+    },
+    {
+      "url": "https://www.thedrum.com/news/cannes-lions-winners-down-the-years-10-the-most-memorable-ads",
+      "purpose": "Use a recommended editorial roundup to discover specific works; preserve attribution and verify originals and awards independently.",
+      "enabled": true
+    },
+    {
+      "url": "https://www.nativeadvertisinginstitute.com/blog/record-breaking-year-winners-branded-content-awards-2026-celebrated-london",
+      "purpose": "Find potential branded-content award-entry leads and follow them to individual works. The URL is a supplied lead, not a verified award claim.",
+      "enabled": true
+    }
+  ],
+  "Creative Publications": [
+    {
+      "url": "https://www.thedrum.com/industry-insight/8-inspiring-content-marketing-campaigns-and-what-you-can-learn-from-them",
+      "purpose": "Discover individual content-marketing campaign leads and verify their original project sources rather than returning the collection article.",
+      "enabled": true
+    },
+    {
+      "url": "https://johnkovacevich.medium.com/78-creative-campaigns-that-caught-our-eye-in-the-second-half-of-2023-ac082ba940ef",
+      "purpose": "Use a supplied campaign collection as a discovery starting point; identify individual works and verify titles, creators and originals.",
+      "enabled": true
+    }
+  ],
+  "Brand & Corporate Films": [
+    {
+      "url": "https://shorthand.com/the-craft/content-marketing-examples/index.html",
+      "purpose": "Discover brief-relevant individual branded-content works from a recommended collection and trace their original project pages.",
+      "enabled": true
+    },
+    {
+      "url": "https://nowadays.tv/news-feed/the-best-of-the-best-of-corporate-films-according-to-us",
+      "purpose": "Identify potential corporate-film examples, then verify each named production and its original source rather than adopting the list's claims.",
+      "enabled": true
+    },
+    {
+      "url": "https://www.herenow.film/trimtab/best-corporate-video-examples",
+      "purpose": "Discover specific corporate-video leads and follow source links to independently identifiable works.",
+      "enabled": true
+    },
+    {
+      "url": "https://www.superside.com/blog/brand-video-examples",
+      "purpose": "Find potential individual brand-film references and verify original work identity, credits and evidence before inclusion.",
+      "enabled": true
+    }
+  ],
+  "Studios & Production Companies": [
+    {
+      "url": "https://www.ogilvy.com/ideas/ogilvy-tops-drums-2026-world-creative-rankings",
+      "purpose": "Use a recommended agency article to locate concrete project leads; do not return the rankings article or infer awards for individual works.",
+      "enabled": true
+    }
+  ],
+  "Web & Interactive Design": [
+    {
+      "url": "https://www.creativeboom.com/tips/50-of-the-best-websites-for-daily-inspiration/",
+      "purpose": "Discover named websites or individual interactive-project leads; verify an original project rather than returning a general gallery or collection.",
+      "enabled": true
+    }
+  ],
+  "Podcasts & Interviews": [],
+  "Social & Visual Inspiration": []
+}

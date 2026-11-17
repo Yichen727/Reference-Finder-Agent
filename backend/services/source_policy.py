@@ -1,12 +1,11 @@
 import ipaddress
-import json
 from dataclasses import dataclass
 from urllib.parse import unquote_plus, urlsplit, urlunsplit
 
 from pydantic import HttpUrl, TypeAdapter
 
-from backend.core.config import ROOT
 from backend.schemas.models import SearchStrategy, Source
+from backend.services.source_registry import load_legacy_sources
 
 URL_ADAPTER = TypeAdapter(HttpUrl)
 
@@ -89,7 +88,7 @@ class SearchJob:
 
 class SourcePolicy:
     def __init__(self):
-        self.sources = json.loads((ROOT / "config/sources.json").read_text(encoding="utf-8"))
+        self.sources = load_legacy_sources()
 
     def jobs(self, strategy: SearchStrategy, limit: int) -> list[SearchJob]:
         groups: dict[str, list[Source]] = {}

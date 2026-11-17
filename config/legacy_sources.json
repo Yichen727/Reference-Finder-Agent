@@ -1,0 +1,44 @@
+{
+  "Vimeo": {
+    "group": "video",
+    "domains": ["vimeo.com"],
+    "instruction": "Find public individual works from original creators and production companies, not channel homepages.",
+    "note": "Private or unindexed Vimeo works may be unavailable. Preserve access hashes."
+  },
+  "YouTube": {
+    "group": "video",
+    "domains": ["youtube.com", "youtu.be"],
+    "instruction": "Prefer original brand, director or production-company releases of individual films.",
+    "note": "Search evidence does not establish that the video has been watched."
+  },
+  "Instagram": {
+    "group": "social",
+    "domains": ["instagram.com"],
+    "instruction": "Find public indexed individual Reels or posts; never substitute a profile for a specific work.",
+    "note": "Public indexing and login restrictions limit coverage; this is not full Instagram search."
+  },
+  "Pinterest": {
+    "group": "social",
+    "domains": ["pinterest.com", "pinterest.co.uk"],
+    "instruction": "Find individual Pins with clear original attribution. Avoid generic inspiration boards.",
+    "note": "Pins may be reposts. Original authorship and reproduction permission remain unverified."
+  },
+  "Studio portfolios": {
+    "group": "original_work",
+    "domains": [],
+    "instruction": "Discover original studio and director project pages. Search the wider web rather than a fixed studio list.",
+    "note": "Portfolio categorisation is provisional until the original project page is reviewed."
+  },
+  "Production companies": {
+    "group": "original_work",
+    "domains": [],
+    "instruction": "Discover original production-company project pages with identifiable work and credits.",
+    "note": "Production credits are only included when present in the cited search evidence."
+  },
+  "Award archives": {
+    "group": "awards",
+    "domains": ["canneslions.com", "lovethework.com", "dandad.org", "theoneclub.org", "clios.com", "thefwa.com"],
+    "instruction": "Find official individual award-entry pages. Do not infer an award from a general archive listing.",
+    "note": "Subscriptions and indexing may limit access. Award names, years and categories require source evidence."
+  }
+}
