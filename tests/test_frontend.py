@@ -300,8 +300,13 @@ def test_filters_preserve_hidden_selections_and_annotation_edits(bridge, client)
 
 
 def test_filter_popover_count_and_clear_preserve_pack_exports_and_exclusions(bridge, client):
-    app = launch(open_app())
+    prompt = (
+        "A renewable energy brand film exploring local communities, landscapes and a hopeful shared future."
+    )
+    app = launch(open_app(), concept=prompt)
     run = SearchRun.model_validate(app.session_state["run"])
+    title = "Renewable Energy Brand Film"
+    client.patch(f"/search-runs/{run.id}/title", json={"title": title})
     run.results[1].platform = "YouTube"
     run.results[1].strand = "Execution"
     client.app.state.workflow.repository.put("run", run)
@@ -309,6 +314,8 @@ def test_filter_popover_count_and_clear_preserve_pack_exports_and_exclusions(bri
     app.query_params["run"] = run.id
     app.run()
     record = app.session_state["run"]
+    assert any(item.value == f"3 Results · {title}" for item in app.caption)
+    assert all(prompt not in item.value for item in app.caption)
     assert not any(item.label == "Filter Results" for item in app.expander)
     popover = widget(app.get("popover"), f"result_filters_{run.id}")
     assert [item.label for item in popover.multiselect] == ["Source", "Creative Category"]
@@ -323,6 +330,7 @@ def test_filter_popover_count_and_clear_preserve_pack_exports_and_exclusions(bri
     download = copy.deepcopy(app.session_state["pack_downloads"][run.id])
     widget(app.multiselect, f"source_filter_{run.id}").set_value(["YouTube"]).run()
     assert card_count(app) == 1
+    assert any(item.value == f"1 Results · {title}" for item in app.caption)
     assert widget(app.get("popover"), f"result_filters_{run.id}").proto.popover.label == "1"
     widget(app.multiselect, f"strand_filter_{run.id}").set_value(["Story"]).run()
     assert card_count(app) == 0
@@ -338,6 +346,10 @@ def test_filter_popover_count_and_clear_preserve_pack_exports_and_exclusions(bri
     assert widget(app.button, f"clear_filters_{run.id}").disabled
     assert app.session_state["pack_drafts"][run.id] == before
     assert app.session_state["pack_downloads"][run.id] == download
+    requests = len(bridge["requests"])
+    app.run()
+    assert len(bridge["requests"]) == requests
+    assert client.get(f"/briefs/{run.brief_id}").json()["concept"] == prompt
 
 
 def test_exclusions_are_saved_with_the_pack_and_can_be_restored(bridge, client):
@@ -503,6 +515,7 @@ def test_sidebar_rename_updates_immediately_and_preserves_current_pack(bridge, c
     button(app, "Save Title").click().run()
     assert not app.exception
     assert widget(app.button, f"research_{run['id']}").label == "A Manually Named Research"
+    assert any(item.value == "3 Results · A Manually Named Research" for item in app.caption)
     assert client.get("/search-runs").json()[0]["title"] == "A Manually Named Research"
     assert app.session_state["pack_drafts"][run["id"]] == before
     assert app.session_state["run_id"] == run["id"]

@@ -297,6 +297,20 @@ def main():
         )
         wait_until(lambda: cdp.evaluate(f"!!({PACK_ROOT})?.querySelector('.pack-row')"))
         time.sleep(0.5)
+        compact_header = """(() => {
+          const summary=document.querySelector('.st-key-results_summary');
+          const card=document.querySelector('[class*=st-key-reference_card_]');
+          return summary.innerText.includes('Results · Human Side of AI') &&
+            !summary.innerText.includes('A film about the human side of AI') &&
+            card.getBoundingClientRect().top-summary.getBoundingClientRect().bottom<=12;
+        })()"""
+        cdp.screenshot("compact-header.png")
+        assert cdp.evaluate(compact_header), cdp.evaluate("""(() => {
+          const summary=document.querySelector('.st-key-results_summary');
+          const card=document.querySelector('[class*=st-key-reference_card_]');
+          return {text:summary.innerText, summary:summary.getBoundingClientRect().toJSON(),
+            card:card.getBoundingClientRect().toJSON()};
+        })()""")
         geometry = """(() => {
           const rect=e=>{const r=e.getBoundingClientRect();return {x:r.x,y:r.y,w:r.width,h:r.height};};
           const row=document.querySelector('.st-key-research_workspace [data-testid=stHorizontalBlock]');
@@ -367,6 +381,10 @@ def main():
         )
         assert cdp.pack_state() == before_filters
         assert cdp.evaluate(filter_button + ".innerText.includes('1')")
+        assert cdp.evaluate(
+            "document.querySelector('.st-key-results_summary').innerText"
+            ".includes('11 Results · Human Side of AI')"
+        )
         cdp.choose_multiselect(f"strand_filter_{run.id}", "Craft")
         wait_until(
             lambda: cdp.evaluate("document.querySelectorAll('[class*=st-key-card_select_]').length===0")
@@ -493,6 +511,7 @@ def main():
             assert actions[0]["w"] > footer_width * 0.52, (width, actions)
             assert cdp.evaluate(label_alignment), f"Text baselines differ at {width}px"
             assert cdp.evaluate(icon_alignment), f"Add/check icons are off-centre at {width}px"
+            assert cdp.evaluate(compact_header), f"Results header is not compact at {width}px"
             assert cdp.evaluate(f"""(() => {{
               const row=document.querySelector('.st-key-results_heading_{run.id}').getBoundingClientRect();
               const icon=({filter_button}).getBoundingClientRect();
@@ -561,6 +580,10 @@ def main():
             )
         )
         assert cdp.pack_state()["ids"] == displayed
+        assert cdp.evaluate(
+            "document.querySelector('.st-key-results_summary').innerText"
+            ".includes('Results · Human AI References')"
+        )
         assert (
             next(item for item in read_json("http://127.0.0.1:8100/search-runs") if item["id"] == run.id)[
                 "title"

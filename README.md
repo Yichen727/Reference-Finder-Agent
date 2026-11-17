@@ -51,6 +51,8 @@ The footer uses an explicit CSS grid so Details takes the majority of the availa
 Narrow results columns stack cards to preserve readable controls. Add/check icons are
 centred independently of their hidden accessible labels. Workspace CSS is read from
 `frontend/workspace.css` on each full rerun, avoiding stale styles cached in Python imports.
+The compact results header shows the visible result count and saved research title;
+the complete original prompt remains in the research record. No new model request is needed.
 The sliders icon beside **Reference Results** opens source and creative category
 filters in a compact popover. Its count shows the total selected filter values; cards
 update immediately. **Clear Filters** resets both controls without changing Your Pack,
