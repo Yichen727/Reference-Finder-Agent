@@ -301,12 +301,40 @@ def main():
             "document.querySelectorAll('h1').length===1 && "
             "document.querySelector('h1').innerText==='Reference Finder'"
         )
-        actions = cdp.evaluate(f"""[...document.querySelector('.st-key-card_actions_{run.results[0].id}')
+        action_geometry = f"""[...document.querySelector('.st-key-card_actions_{run.results[0].id}')
           .querySelectorAll('button,a')].map(e=>e.getBoundingClientRect())
-          .filter(r=>r.width>0).map(r=>({{x:r.x,y:r.y,w:r.width,h:r.height}}))""")
+          .filter(r=>r.width>0).map(r=>({{x:r.x,y:r.y,w:r.width,h:r.height}}))"""
+        actions = cdp.evaluate(action_geometry)
         assert len(actions) == 3, actions
         assert max(action["y"] for action in actions) - min(action["y"] for action in actions) < 2, actions
-        assert max(action["w"] for action in actions) - min(action["w"] for action in actions) < 2, actions
+        assert abs(actions[2]["w"] - actions[2]["h"]) < 1 and actions[2]["w"] == 40, actions
+        assert actions[0]["w"] > actions[1]["w"] > actions[2]["w"], actions
+        footer_width = cdp.evaluate(
+            f"document.querySelector('.st-key-card_actions_{run.results[0].id}').getBoundingClientRect().width"
+        )
+        assert actions[0]["w"] > footer_width * 0.52, actions
+        label_alignment = f"""(() => {{
+          const row=document.querySelector('.st-key-card_actions_{run.results[0].id}');
+          const labels=[...row.querySelectorAll('button,a')].filter(e=>e.getBoundingClientRect().width>0)
+            .slice(0,2).map(e=>e.querySelector('p'));
+          const ranges=labels.map(label=>{{const r=document.createRange();r.selectNodeContents(label);
+            const b=r.getBoundingClientRect();return {{top:b.top,height:b.height}};}});
+          return Math.abs(ranges[0].top-ranges[1].top)<1 && Math.abs(ranges[0].height-ranges[1].height)<1;
+        }})()"""
+        assert cdp.evaluate(label_alignment), "Details and Link text baselines differ"
+        icon_alignment = """[...document.querySelectorAll('[class*=st-key-card_select_] button')]
+        .every(button=>{
+          const icon=button.querySelector('[data-testid=stIconMaterial]');
+          if (!icon) return false;
+          const b=button.getBoundingClientRect(), i=icon.getBoundingClientRect();
+          return Math.abs((b.x+b.width/2)-(i.x+i.width/2))<.5
+            && Math.abs((b.y+b.height/2)-(i.y+i.height/2))<.5;
+        })"""
+        assert cdp.evaluate(icon_alignment), "Add/check icon is not centred"
+        footer = cdp.evaluate(
+            f"document.querySelector('.st-key-card_actions_{run.results[0].id}').getBoundingClientRect().right"
+        )
+        assert abs(actions[2]["x"] + actions[2]["w"] - footer) < 2, actions
         assert max(action["h"] for action in actions) - min(action["h"] for action in actions) < 2, actions
         cdp.screenshot("desktop.png")
         # The icon toggles selection through the existing callback, without duplicates.
@@ -314,10 +342,11 @@ def main():
         cdp.evaluate(icon + ".click()")
         wait_until(lambda: cdp.pack_state()["ids"] == [item.id for item in run.results[:4]])
         assert cdp.evaluate(icon + ".innerText.includes('check')")
+        assert cdp.evaluate(icon_alignment), "Selected checkmark is not centred"
         cdp.evaluate(icon + ".click()")
         wait_until(lambda: cdp.pack_state()["ids"] == [item.id for item in run.results[:3]])
         calls = api_count()
-        cdp.click("View Details")
+        cdp.click("Details")
         wait_until(lambda: cdp.evaluate("!!document.querySelector('[role=dialog]')"))
         assert (
             cdp.evaluate("document.querySelector('[role=dialog]').querySelectorAll('textarea').length") == 0
@@ -394,7 +423,7 @@ def main():
         )
         print("Duplicate titles, row removal and exact DOCX export order passed", flush=True)
         samples = {}
-        for width in [1200, 1024, 768, 390]:
+        for width in [1200, 1101, 1024, 768, 390]:
             cdp.call(
                 "Emulation.setDeviceMetricsOverride",
                 width=width,
@@ -407,6 +436,21 @@ def main():
             samples[str(width)] = sample
             assert sample["direction"] == ("row" if width > 1100 else "column"), sample
             assert not sample["overflow"], sample
+            actions = cdp.evaluate(action_geometry)
+            assert max(action["y"] for action in actions) - min(action["y"] for action in actions) < 2, (
+                actions
+            )
+            assert abs(actions[2]["w"] - actions[2]["h"]) < 1, actions
+            footer_width = cdp.evaluate(
+                f"document.querySelector('.st-key-card_actions_{run.results[0].id}').getBoundingClientRect().width"
+            )
+            assert actions[0]["w"] > footer_width * 0.52, (width, actions)
+            assert cdp.evaluate(label_alignment), f"Text baselines differ at {width}px"
+            assert cdp.evaluate(icon_alignment), f"Add/check icons are off-centre at {width}px"
+            assert cdp.evaluate(f"""(() => {{
+              const label=document.querySelector('.st-key-card_actions_{run.results[0].id} a p');
+              return !!label && label.scrollWidth <= label.clientWidth + 1;
+            }})()"""), f"Link label is clipped at {width}px"
             cdp.evaluate("document.querySelector('[data-testid=stMain]').scrollTop=0")
             cdp.screenshot(f"width-{width}.png")
         cdp.call(
@@ -494,7 +538,7 @@ def main():
         assert cdp.evaluate("document.querySelector('h1').innerText==='Reference Finder'")
         cdp.screenshot("deleted-home.png")
         print(
-            "Persistent header, equal card actions, icon toggle, rename and confirmed deletion passed",
+            "Header, compact actions, square icon toggle, rename and confirmed deletion passed",
             flush=True,
         )
         (ARTIFACTS / "report.json").write_text(

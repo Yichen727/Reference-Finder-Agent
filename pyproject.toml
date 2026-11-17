@@ -25,7 +25,7 @@ dev = ["pytest>=8,<10", "ruff>=0.9,<1"]
 include = ["backend*", "frontend*"]
 
 [tool.setuptools.package-data]
-frontend = ["pack_assets/*.js", "pack_assets/*.css"]
+frontend = ["workspace.css", "pack_assets/*.js", "pack_assets/*.css"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

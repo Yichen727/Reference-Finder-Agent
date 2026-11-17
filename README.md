@@ -7,7 +7,7 @@ The workspace provides real external reference discovery:
 
 1. Describe your creative idea and click **Find References**.
 2. The app generates a strategy and starts searching automatically.
-3. Browse up to 15 visual references in the centre and open **View Details** for the existing analysis.
+3. Browse up to 15 visual references in the centre and open **Details** for the existing analysis.
 4. Click **+** to add a reference, drag selected items into order, or remove one with its row's **×** button.
 5. Click **Export Reference Pack** to save the latest edits and prepare a DOCX download.
 
@@ -37,14 +37,20 @@ shortcut; cards also stack on phone-sized screens. Start another search with **N
 in the sidebar. Earlier research drafts remain available when navigating back to those records.
 
 Cards show the work title, source, creative strand and a short **What to Borrow**.
-The three equal-width actions are **View Details**, **Link ↗**, and **+**. The plus changes
+The action row has a subtle divider and proportional columns: a wide outlined **Details** button,
+a centred lightweight **Link** with an external-link icon, and a 40px square **+** button at the
+right edge, aligned on one baseline. The plus changes
 to a highlighted checkmark when selected; clicking again removes it. Both states retain
-accessible Add/Remove labels and tooltips. The summary contains at most two sentences. **View Details** opens a
+accessible Add/Remove labels and tooltips. The summary contains at most two sentences. **Details** opens a
 read-only report: **What It Is**, **What to Borrow**, **Why It Fits Your Brief**, and
 **Production Considerations**. It shows the preview, title, creator and source, with
 **View Original** and **Add to Pack / Remove from Pack** actions. Source evidence,
 verification and rights remain in a collapsed section. Opening details uses data already
 loaded in the session: it makes no additional backend, preview or AI requests.
+The footer uses an explicit CSS grid so Details takes the majority of the available width.
+Narrow results columns stack cards to preserve readable controls. Add/check icons are
+centred independently of their hidden accessible labels. Workspace CSS is read from
+`frontend/workspace.css` on each full rerun, avoiding stale styles cached in Python imports.
 The collapsed **Filter Results** section filters sources and creative
 categories. **Exclude Reference** in the dialog removes a candidate from browsing and the pack;
 **Restore Excluded References** brings it back. Filters never deselect hidden references
@@ -389,7 +395,8 @@ through Streamlit's locked dependencies.
 ```text
 frontend/                  Streamlit interface and HTTP client
 frontend/curation.py        Durable browser draft and selection helpers
-frontend/layout.py          Scoped responsive layout and compact summary helpers
+frontend/layout.py          Preview rendering and compact summary helpers
+frontend/workspace.css      Responsive workspace styles, reloaded on each rerun
 frontend/pack_component.py  Native Streamlit component registration
 frontend/pack_assets/       Offline drag, keyboard and remove controls
 backend/main.py            FastAPI application and routes

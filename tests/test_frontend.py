@@ -541,3 +541,32 @@ def test_old_backend_explains_restart_and_preserves_failed_delete_draft(bridge, 
     assert client.get(f"/search-runs/{run['id']}").status_code == 200
     button(app, "Cancel").click().run()
     assert not app.exception and selected(app, run, 0)
+
+
+def test_workspace_styles_refresh_on_rerun_even_when_python_modules_are_cached(bridge, monkeypatch):
+    import streamlit as st
+
+    style_path = APP.with_name("workspace.css")
+    original_read = Path.read_text
+    stylesheet = {"text": original_read(style_path) + "\n/* workspace-first-revision */"}
+    captured = []
+    original_html = st.html
+
+    def read_text(path, *args, **kwargs):
+        if path == style_path:
+            return stylesheet["text"]
+        return original_read(path, *args, **kwargs)
+
+    def html(body, *args, **kwargs):
+        captured.append(body)
+        return original_html(body, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", read_text)
+    monkeypatch.setattr(st, "html", html)
+    app = open_app()
+    assert "workspace-first-revision" in captured[-1]
+    stylesheet["text"] = stylesheet["text"].replace("workspace-first-revision", "workspace-second-revision")
+    app.run()
+    assert not app.exception
+    assert "workspace-second-revision" in captured[-1]
+    assert "workspace-first-revision" not in captured[-1]

@@ -1,10 +1,11 @@
+from pathlib import Path
 from uuid import uuid4
 
 import streamlit as st
 
 from frontend.api_client import APIClient, APIError
 from frontend.curation import EDIT_FIELDS, apply_pack_action, draft_from_run, selection_payload
-from frontend.layout import WORKSPACE_STYLE, borrow_summary, preview_markup
+from frontend.layout import borrow_summary, preview_markup
 from frontend.pack_component import pack_list
 
 SOURCES = [
@@ -372,18 +373,24 @@ def reference_card(run, item, draft, previews):
         annotation = draft["annotations"][item_id]
         st.markdown("**What to Borrow:** " + borrow_summary(annotation["what_to_borrow"]))
         with st.container(key=f"card_actions_{item_id}"):
-            details, link, selection = st.columns(3, gap="xxsmall", wrap=False)
+            details, link, selection = st.columns([6, 3, 1.2], gap="xsmall", wrap=False)
             details.button(
-                "View Details",
+                "Details",
                 key=f"details_{item_id}",
                 width="stretch",
-                wrap=True,
+                wrap=False,
                 help=f"Read the existing analysis for {item['title']}",
                 on_click=open_detail,
                 args=(run_id, item_id),
             )
             link.link_button(
-                "Link ↗", item["source_url"], width="stretch", help="Open the original source in a new tab"
+                "Link",
+                item["source_url"],
+                type="tertiary",
+                icon=":material/open_in_new:",
+                icon_position="right",
+                width="stretch",
+                help="Open the original source in a new tab",
             )
             selected = item_id in draft["ordered_ids"]
             with selection.container(key=f"card_select_{item_id}"):
@@ -391,9 +398,9 @@ def reference_card(run, item, draft, previews):
                     "Remove from Pack" if selected else "Add to Pack",
                     icon=":material/check:" if selected else ":material/add:",
                     key=f"pick_action_{run_id}_{item_id}",
-                    width="stretch",
+                    width=40,
                     type="primary" if selected else "secondary",
-                    help=f"{'Remove from' if selected else 'Add to'} Your Pack: {item['title']}",
+                    help="Remove from Pack" if selected else "Add to Pack",
                     on_click=toggle_reference,
                     args=(run_id, item_id),
                 )
@@ -511,7 +518,6 @@ def selection_panel(run, draft):
             activate_run(run["id"], reload_saved=True)
             st.rerun()
     download = st.session_state.setdefault("pack_downloads", {}).get(run["id"])
-    st.caption("Export as an editable DOCX document.")
     if st.button(
         "Export Reference Pack",
         type="secondary" if download else "primary",
@@ -589,7 +595,8 @@ def result_panel():
 
 
 def main():
-    st.html(WORKSPACE_STYLE)
+    stylesheet = Path(__file__).with_name("workspace.css").read_text(encoding="utf-8")
+    st.html(f"<style>{stylesheet}</style>")
     st.title("Reference Finder")
     st.write("Turn your creative idea into a curated reference pack.")
     try:
