@@ -181,7 +181,7 @@ def display_error(error: APIError):
 def sidebar():
     with st.sidebar:
         st.caption("ATOMIZED STUDIOS")
-        st.button("New Research", on_click=new_research, width="stretch")
+        st.button("New Research", icon=":material/edit_square:", on_click=new_research, width="stretch")
         if "recent_runs" not in st.session_state:
             st.session_state["recent_runs"] = client.request("GET", "/search-runs")
         recent = st.session_state["recent_runs"]
