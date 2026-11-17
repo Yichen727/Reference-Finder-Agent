@@ -78,9 +78,11 @@ ratio. Missing or invalid previews use a placeholder. Exporting does not make ad
 OpenAI calls or download new images.
 
 The default search requests 10 references; you can request up to 20. Some searches
-return fewer usable results. Sources include Vimeo, YouTube, Instagram, Pinterest,
-studio portfolios, production companies, and award archives. Internal case studies
-are planned for a later phase.
+return fewer usable results. All eight source categories are selected by default:
+Video & Film, Awards & Winning Work, Creative Publications, Brand & Corporate Films,
+Studios & Production Companies, Web & Interactive Design, Podcasts & Interviews,
+and Social & Visual Inspiration. Deselect any category to narrow your search.
+Internal case studies are planned for a later phase.
 
 Use **New Research** in the sidebar to start again. Click a title under **Recent Research**
 to reopen a search; its **...** menu lets you rename or delete it after confirmation.
@@ -96,6 +98,7 @@ Research is stored locally in `data/reference_finder.sqlite3`, and exports in `d
 | A port is already in use | Stop the previous launcher, or run `.\.venv\Scripts\python.exe run.py --backend-port 8001 --frontend-port 8502 --open-browser`. |
 | No usable references are found | Try a clearer prompt, broader sources, or fewer creative constraints. |
 | A thumbnail is missing | The preview is unavailable or restricted. Use **Link** to view the original. |
+| Source options cannot load | Click **Retry Sources**. Your entered idea and constraints are kept. |
 | Export reports a saved-pack conflict | **Load Saved Pack** replaces your current draft with the saved version. Review it before exporting again. |
 | Export asks for a workspace restart | Your pack has been saved. Stop the old launcher, restart it, reopen the research, and export again. |
 | A reference's text exceeds one slide | Remove the named reference and retry. Its full analysis remains in the saved research. |
@@ -111,11 +114,11 @@ Research is stored locally in `data/reference_finder.sqlite3`, and exports in `d
 ```
 
 API documentation: **http://127.0.0.1:8000/docs** while the app is running.
-Source migration Phases 1–2 provide the eight-category registry in `config/sources.json`
-and backend search support. `GET /source-categories` returns ordered category metadata.
-The current frontend and compatibility `GET /sources` endpoint retain the seven legacy
-labels until Phase 3; new submissions map them to the corresponding merged categories.
-Historical research keeps its original labels. Search priorities reuse the existing
+The frontend reads its eight categories from `GET /source-categories`, backed by
+`config/sources.json`, and retains source choices across submitted forms and navigation.
+The compatibility `GET /sources` endpoint retains the seven legacy labels; old API
+submissions map them to the corresponding merged categories.
+Historical research keeps its original labels and platform filters. Search priorities reuse the existing
 planning call, and result platforms still identify the actual publishing site.
 Curated Seeds are deferred: the registry and search never load or require
 `config/curated_seeds.json`. Its existing content is an unused draft.

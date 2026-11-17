@@ -15,15 +15,6 @@ from frontend.search_progress import pipeline_stage, show_search_progress
 if not hasattr(layout, "description_summary"):
     reload(layout)
 
-SOURCES = [
-    "Vimeo",
-    "YouTube",
-    "Instagram",
-    "Pinterest",
-    "Studio portfolios",
-    "Production companies",
-    "Award archives",
-]
 client = APIClient()
 st.set_page_config(page_title="Reference Finder", page_icon="A", layout="wide")
 
@@ -311,27 +302,74 @@ def submit_pending():
     st.rerun()
 
 
+def source_categories():
+    if "source_categories" not in st.session_state:
+        categories = client.request("GET", "/source-categories")
+        if (
+            not isinstance(categories, list)
+            or len(categories) != 8
+            or any(
+                not isinstance(category, dict)
+                or not isinstance(category.get("name"), str)
+                or not category["name"].strip()
+                or not isinstance(category.get("default_selected"), bool)
+                for category in categories
+            )
+            or len({category["name"] for category in categories}) != len(categories)
+        ):
+            raise APIError("The source category list is unavailable.")
+        st.session_state["source_categories"] = categories
+    return st.session_state["source_categories"]
+
+
 def brief_form(health):
+    try:
+        categories = source_categories()
+    except APIError:
+        categories = None
+        st.error("Source options are temporarily unavailable. Retry loading them to start your search.")
     with st.form("brief_form"):
         concept = st.text_area(
             "Describe your creative idea",
+            key="brief_concept",
             height=180,
             placeholder="A short film that makes a complex idea feel human...",
         )
         with st.expander("Advanced Options"):
-            sources = st.multiselect("Sources", SOURCES, default=SOURCES)
+            if categories is not None:
+                options = [category["name"] for category in categories]
+                choices = st.session_state.get(
+                    "research_source_choices",
+                    [category["name"] for category in categories if category["default_selected"]],
+                )
+                if "brief_sources" not in st.session_state:
+                    st.session_state["brief_sources"] = [choice for choice in choices if choice in options]
+                sources = st.multiselect("Sources", options, key="brief_sources")
+            else:
+                sources = []
+                st.caption("Sources will appear once the options have loaded.")
             count = st.number_input(
                 "Reference Count", 1, health["max_references"], min(10, health["max_references"])
             )
             constraints = st.text_area(
                 "Creative Constraints",
+                key="brief_constraints",
                 height=90,
                 placeholder="Budget, timing, required elements, or anything to avoid (optional)",
             )
-        submit = st.form_submit_button("Find References", type="primary")
+        submit = st.form_submit_button("Find References", type="primary", disabled=categories is None)
+        if categories is None:
+            # Submit the form to preserve its pending inputs while retrying metadata.
+            st.form_submit_button("Retry Sources", key="retry_source_categories")
+    if categories is not None:
+        # Keep source preferences outside widget state so navigation does not reset them.
+        st.session_state["research_source_choices"] = list(sources)
     if submit:
-        if not concept.strip() or not sources:
-            st.error("Describe your idea and select at least one source.")
+        if not sources:
+            st.error("Select at least one source.")
+            return
+        if not concept.strip():
+            st.error("Describe your creative idea.")
             return
         if not health["live_search_ready"]:
             st.error("The search service is unavailable. Please contact the workspace administrator.")

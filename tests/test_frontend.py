@@ -5,6 +5,7 @@ import pytest
 from streamlit.testing.v1 import AppTest
 
 from backend.schemas.models import ApprovedThumbnail, SearchRun
+from backend.services.source_registry import load_source_registry
 from frontend.api_client import APIClient, APIError
 from tests.pptx_helpers import slide_text, slides_from_bytes
 
@@ -29,6 +30,11 @@ def bridge(client, monkeypatch):
 
     def request(self, method, path, payload=None, *, binary=False):
         state["requests"].append((method, path, copy.deepcopy(payload)))
+        if path == "/source-categories":
+            if state.get("fail_sources"):
+                raise APIError("Source metadata is unavailable.", status=503)
+            if "source_metadata" in state:
+                return copy.deepcopy(state["source_metadata"])
         if method in {"DELETE", "PATCH"} and state.get("stale_backend"):
             raise APIError(
                 "This HTTP method is not supported for this endpoint.", code="http_error", status=405
@@ -204,6 +210,86 @@ def test_search_options_only_expose_sources_count_and_constraints(bridge, client
     )
     assert set(submitted) == {"concept", "constraints", "preferred_sources", "requested_count"}
     assert app.session_state["run"]["strategy"]["strands"]
+
+
+def test_source_categories_come_from_backend_with_all_eight_selected_and_are_cached(bridge):
+    app = open_app()
+    expected = list(load_source_registry().categories)
+    sources = widget(app.multiselect, "brief_sources")
+    assert sources.options == sources.value == expected
+    assert "Podcasts & Interviews" in sources.options
+    assert all(not item.proto.expanded for item in app.expander)
+    app.run()
+    assert sum(path == "/source-categories" for _, path, _ in bridge["requests"]) == 1
+
+
+def test_source_deselections_survive_reruns_submission_and_research_navigation(bridge):
+    app = open_app()
+    chosen = ["Video & Film", "Studios & Production Companies"]
+    widget(app.multiselect, "brief_sources").set_value(chosen)
+    button(app, "Find References").click().run()  # Commit the form through validation, without searching.
+    app.run()
+    assert widget(app.multiselect, "brief_sources").value == chosen
+    launch(app, count=4)
+    run = app.session_state["run"]
+    assert run["strategy"]["preferred_sources"] == chosen
+    pick(app, run, 0)
+    before = copy.deepcopy(app.session_state["pack_drafts"][run["id"]])
+    button(app, "New Research").click().run()
+    assert widget(app.multiselect, "brief_sources").value == chosen
+    assert "Podcasts & Interviews" not in app.session_state["research_source_choices"]
+    widget(app.button, f"research_{run['id']}").click().run()
+    assert app.session_state["pack_drafts"][run["id"]] == before
+    assert sum(path == "/source-categories" for _, path, _ in bridge["requests"]) == 1
+
+
+def test_empty_source_selection_stays_empty_and_does_not_submit(bridge):
+    app = open_app()
+    widget(app.multiselect, "brief_sources").set_value([])
+    launch(app, count=4)
+    assert any("Select at least one source" in error.value for error in app.error)
+    assert widget(app.multiselect, "brief_sources").value == []
+    assert not any(method == "POST" for method, _, _ in bridge["requests"])
+
+
+def test_unavailable_sources_disable_search_and_retry_without_losing_form_input(bridge):
+    bridge["fail_sources"] = True
+    app = open_app()
+    assert app.error and button(app, "Find References").disabled
+    assert not app.multiselect
+    area(app, "Describe your creative idea").input("Keep this unfinished creative idea")
+    area(app, "Creative Constraints").input("One location")
+    bridge["fail_sources"] = False
+    button(app, "Retry Sources").click().run()
+    assert not app.error and not app.exception
+    assert area(app, "Describe your creative idea").value == "Keep this unfinished creative idea"
+    assert area(app, "Creative Constraints").value == "One location"
+    assert widget(app.multiselect, "brief_sources").value == list(load_source_registry().categories)
+    assert not button(app, "Find References").disabled
+    assert not any(method == "POST" for method, _, _ in bridge["requests"])
+
+
+@pytest.mark.parametrize("response", [None, {}, [], [{"name": "Old source", "default_selected": True}] * 8])
+def test_invalid_source_metadata_never_falls_back_or_enables_search(bridge, response):
+    bridge["source_metadata"] = response
+    app = open_app()
+    assert app.error and button(app, "Find References").disabled
+    assert not app.multiselect and not app.exception
+
+
+def test_saved_research_does_not_require_new_search_metadata(bridge):
+    app = launch(open_app(), count=4)
+    run = app.session_state["run"]
+    pick(app, run, 0)
+    before = copy.deepcopy(app.session_state["pack_drafts"][run["id"]])
+    button(app, "New Research").click().run()
+    del app.session_state["source_categories"]
+    bridge["fail_sources"] = True
+    app.run()
+    assert app.error
+    widget(app.button, f"research_{run['id']}").click().run()
+    assert not app.error and card_count(app) == 4
+    assert app.session_state["pack_drafts"][run["id"]] == before
 
 
 def test_lost_submission_response_reuses_the_same_run(bridge, client):

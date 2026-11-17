@@ -3,8 +3,10 @@
 import base64
 import json
 import os
+import shutil
 import subprocess
 import sys
+import tempfile
 import time
 from io import BytesIO
 from pathlib import Path
@@ -25,7 +27,7 @@ from tests.conftest import completed_run  # noqa: E402
 from tests.fixtures import FixtureProvider  # noqa: E402
 from tests.pptx_helpers import slide_text, slides_from_bytes  # noqa: E402
 
-ARTIFACTS = ROOT / "data" / "ui-review" / str(int(time.time()))
+ARTIFACTS = Path(tempfile.gettempdir()) / "atomized-ui-review" / str(time.time_ns())
 OPENER = build_opener(ProxyHandler({}))
 PACK_ROOT = "[...document.querySelectorAll('*')].map(e=>e.shadowRoot).find(r=>r?.querySelector('.pack-list'))"
 
@@ -175,6 +177,9 @@ def seed(config):
             workflow.repository.put("brief", brief)
             runs.append(workflow.run(record["id"]))
         run = runs[0]
+        for item in run.results:
+            item.platform = "Vimeo"
+            item.source_category = "Video & Film"
         run.results[0].platform = "YouTube"
         run.results[0].strand = "Craft"
         for index, item in enumerate(run.results[:3]):
@@ -300,6 +305,7 @@ def main():
         repository.put("run", running)
         assert read_json("http://127.0.0.1:8100/health")["max_references"] == 20
         cdp.call("Page.navigate", url=f"http://127.0.0.1:8601/?run={run.id}")
+        wait_until(lambda: cdp.evaluate("!!document.body"))
         for stage, label, value in [
             ("starting_external_search", "Selecting Sources", 20),
             ("searching_1_of_4", "Searching References", 40),
@@ -678,6 +684,45 @@ def main():
         assert run.id not in [item["id"] for item in read_json("http://127.0.0.1:8100/search-runs")]
         assert cdp.evaluate("document.querySelector('h1').innerText==='Atomized Reference Finder'")
         cdp.screenshot("deleted-home.png")
+        # The new form uses backend metadata, independent of the saved run's platform labels.
+        expected_sources = [item["name"] for item in read_json("http://127.0.0.1:8100/source-categories")]
+        source_tags = (
+            "document.querySelectorAll('.st-key-brief_sources [aria-label=\"Selected values\"] [data-tag]')"
+        )
+        cdp.evaluate(
+            "[...document.querySelectorAll('summary')]"
+            ".find(e=>e.innerText.includes('Advanced Options')).click()"
+        )
+        wait_until(lambda: cdp.evaluate(f"{source_tags}.length===8"))
+        assert len(expected_sources) == 8
+        assert cdp.evaluate(
+            f"{json.dumps(expected_sources)}.every(name=>document.querySelector('.st-key-brief_sources').innerText.includes(name))"
+        )
+        cdp.screenshot("eight-source-options-desktop.png")
+        cdp.call(
+            "Emulation.setDeviceMetricsOverride", width=390, height=1000, deviceScaleFactor=1, mobile=False
+        )
+        time.sleep(0.3)
+        assert cdp.evaluate("document.documentElement.scrollWidth<=innerWidth")
+        cdp.screenshot("eight-source-options-narrow.png")
+        cdp.call(
+            "Emulation.setDeviceMetricsOverride", width=1440, height=1000, deviceScaleFactor=1, mobile=False
+        )
+        cdp.evaluate(
+            "document.querySelector('.st-key-brief_sources "
+            'button[aria-label="Remove Podcasts & Interviews"]\').click()'
+        )
+        wait_until(lambda: cdp.evaluate(f"{source_tags}.length===7"))
+        cdp.click("Find References")  # Empty prompt: validation rerun, never starts research.
+        wait_until(lambda: cdp.evaluate("document.body.innerText.includes('Describe your creative idea.')"))
+        assert cdp.evaluate(f"{source_tags}.length===7")
+        assert cdp.evaluate(
+            f"[...{source_tags}].every(tag=>tag.getAttribute('aria-label')!=='Podcasts & Interviews')"
+        )
+        print(
+            "Eight source defaults, optional podcast deselection, validation rerun and narrow form passed",
+            flush=True,
+        )
         print(
             "Header, compact actions, square icon toggle, rename and confirmed deletion passed",
             flush=True,
@@ -689,6 +734,7 @@ def main():
                     "responsive": samples,
                     "export_order": displayed,
                     "details_api_calls": 0,
+                    "source_categories": expected_sources,
                 },
                 indent=2,
             ),
@@ -699,7 +745,16 @@ def main():
     finally:
         for process in reversed(processes):
             if process.poll() is None:
-                process.terminate()
+                if os.name == "nt":
+                    # The venv launcher may own a base-Python child; stop this test's whole tree.
+                    subprocess.run(
+                        ["taskkill", "/PID", str(process.pid), "/T", "/F"],
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL,
+                        creationflags=subprocess.CREATE_NO_WINDOW,
+                    )
+                else:
+                    process.terminate()
                 try:
                     process.wait(timeout=5)
                 except subprocess.TimeoutExpired:
@@ -707,6 +762,15 @@ def main():
                     process.wait(timeout=5)
         for log in logs:
             log.close()
+        profile = ARTIFACTS / "chrome-profile"
+        if profile.exists():
+            temporary_root = Path(tempfile.gettempdir()).resolve()
+            if (
+                not ARTIFACTS.resolve().is_relative_to(temporary_root)
+                or profile.resolve().parent != ARTIFACTS.resolve()
+            ):
+                raise RuntimeError("Unexpected browser profile path; cleanup stopped")
+            shutil.rmtree(profile)
 
 
 if __name__ == "__main__":

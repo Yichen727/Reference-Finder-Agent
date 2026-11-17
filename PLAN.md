@@ -2,7 +2,7 @@
 
 更新日期：2026-11-17
 当前进度：Phase 1–4 已实现；Streamlit 已支持真实外部搜索、双列视觉卡片、历史研究、拖拽参考包、只读分析及模板化 PPTX 导出。Mock 运行模式与示例数据未加入应用。
-来源迁移进度：第 12 节 **Source Architecture Migration — 8 Categories** 的 Migration Phase 1–2 已完成，后端支持 8 类 Sources、新旧类别兼容、受控调度和真实平台标识；Curated Seeds 已从注册表与搜索依赖中解除，继续暂缓。前端仍使用旧 7 类选项并由后端映射，等待 Phase 3 切换。内部案例 Phase 5 继续独立暂缓。
+来源迁移进度：第 12 节 **Source Architecture Migration — 8 Categories** 的 Migration Phase 1–3 已完成，前端从后端注册表读取 8 类 Sources、默认全选并保留已提交的来源偏好；后端支持新旧类别兼容、受控调度和真实平台标识。Curated Seeds 不被注册表或搜索读取，继续暂缓。Phase 4 保留为集中验收；内部案例 Phase 5 继续独立暂缓。
 Phase 4 已完成：每条 reference 使用 Single 模板生成一张可编辑 Slide，插入 Base 模板原第 2、3 页之间。4 条参考 / 7 页示例已通过 PowerPoint 实际打开、图片及文字边界检查；历史 DOCX 接口和文件下载保留兼容。
 最新调整：按用户要求将结果与参考包上限提升至 20，默认请求仍为 10；搜索与界面验证使用 4 个参考。新增原生五阶段进度，按真实流程推进，以已完成阶段数表示进展，不估算剩余时间；失败时清除进度，并沿用原提交键恢复搜索。
 语言约定：本计划保留中文；代码、界面、提示模板、README 和导出文档统一使用英文。
@@ -244,7 +244,7 @@ Web Search 支持来源信息和域名过滤，可用于受控的多来源查询
 | --- | --- | --- |
 | GET | `/health` | 服务、运行模式和配置是否就绪；不返回密钥 |
 | GET | `/sources` | 当前搜索使用的 7 类兼容配置；Migration Phase 1 保持响应结构不变 |
-| GET | `/source-categories` | 8 类元数据，按显示顺序返回；后端已支持新类别，前端选项将在 Migration Phase 3 接入 |
+| GET | `/source-categories` | 8 类元数据，按显示顺序返回；前端 Sources 已接入，默认全部选中 |
 | POST | `/briefs` | 校验并保存 Brief |
 | POST | `/briefs/{brief_id}/strategy` | 生成可编辑的外部搜索策略 |
 | POST | `/search-runs` | 提交 Brief 和确认后的策略，返回运行 ID |
@@ -528,7 +528,7 @@ Phase 4 已将两份 PPTX 模板及版本清单复制到 `backend/templates/` �
 
 ## 12. Source Architecture Migration — 8 Categories
 
-状态：**Migration Phase 1–2 已完成，Phase 3–4 待实施。** 以下 Migration Phase 1–4 是来源迁移的四个步骤，与前文已完成的 MVP Phase 1–4 区分。后端新搜索已使用 8 类，保留旧类别请求映射及历史读取；前端菜单尚未切换，不改写历史研究或迁移数据库。
+状态：**Migration Phase 1–3 已完成，Phase 4 待集中验收。** 以下 Migration Phase 1–4 是来源迁移的四个步骤，与前文已完成的 MVP Phase 1–4 区分。前后端已接入 8 类，保留旧类别请求映射及历史读取，不改写历史研究或迁移数据库。
 
 **最新范围约束（优先于原附件及已完成阶段记录）：只做 8 类 Sources 的迁移，Curated Seeds 暂时不实施。** 本次交付包含类别配置、后端校验/必要调度适配、前端选项和历史兼容；采用满足迁移的最小修改。seed 加载、筛选、抓取、合集拆解、专用预算及相关测试都不是迁移前置条件或验收项，不自动并入后续 Phase。已有 seed 文件和校验原型只是暂存资料；Phase 2 已解除 `load_source_registry()` 对 `curated_seeds.json` 的强制依赖，文件缺失或损坏均不影响 8 类元数据及搜索。是否继续做 Curated Seeds 等用户以后明确安排。
 
@@ -678,11 +678,11 @@ Video & Film、Podcasts & Interviews、Social & Visual Inspiration 暂无指定 
 - 最终 reference 的 source_category 记录发现类别，platform 从证据来源 URL 推导；页面跳转后的实际发布平台不取代发现范围。coverage 按去重后代表作品的主类别计数，其他合并来源继续保留在证据和 alternate_urls 中。新出版网站使用保守的来源可信度回退，原有评分权重及 Instagram/Pinterest 的较低来源权重保持不变。
 - 完整回归 **220 项通过**；随后补充策略越界与历史 Brief 重启检查，迁移专项 **21 项通过**。覆盖全部 8 类逐类搜索、官方域名/开放搜索、无 seed 或坏 seed 文件、类别优先级、旧记录与选择不改写、PPTX 导出及旧提交指纹重试；代码与格式检查通过。
 - 只重载后端并保留 Streamlit 会话；运行中的 OpenAPI 已确认接受 8 类、提供 source_category 与可选 source_priority。重载前后只读比对正式库中的 10 条 Brief/Research payload 完全一致，现有研究可读取、前端健康状态正常。没有执行付费搜索或消耗 OpenAI 额度；临时测试文件独立放置并清理。
-- 当前前端仍显示旧 7 类，后端接受并映射这些标签；8 类菜单、默认全选及前端元数据接入属于下一步 Migration Phase 3。Curated Seeds 继续暂缓。
+- Phase 2 完成时前端仍显示旧 7 类，后端接受并映射这些标签；此后的 8 类菜单及元数据接入在 Phase 3 完成。Curated Seeds 继续暂缓。
 
 ### 12.6 Migration Phase 3 — Frontend
 
-**影响文件：** `frontend/app.py`、`frontend/api_client.py`（如来源元数据读取需要）、`frontend/curation.py`（仅兼容需要）、`README.md`。不修改卡片 CSS、拖拽组件、页面布局或 PPTX 模板。
+**状态：已完成。实际影响文件：** `frontend/app.py`、`tests/test_frontend.py`、`scripts/verify_ui.py`、`README.md` 和本计划。复用原 APIClient，无需修改 `frontend/api_client.py` 或 `frontend/curation.py`；卡片 CSS、拖拽组件、页面布局与 PPTX 模板不变。
 
 实施步骤：
 
@@ -694,10 +694,20 @@ Video & Film、Podcasts & Interviews、Social & Visual Inspiration 暂无指定 
 
 验收标准：
 
-- [ ] Advanced Options 恰好显示 8 个类别，初次默认全选，任意取消后重运行仍保持选择；Source 数量不与 reference 数量混淆。
-- [ ] Podcasts & Interviews 与其他类别拥有完全相同的可选行为，不产生每次必须访问 GQ 的限制。
-- [ ] 新研究提交规范的新类别；现有研究不会因切换来源菜单而重置结果、筛选或参考包。
-- [ ] 桌面双列 Cards、窄屏堆叠、Recent Research、只读详情、拖拽与 PPTX 下载均沿用当前体验，不新增配置面板。
+- [x] Advanced Options 恰好显示 8 个类别，初次默认全选，取消并提交表单后重运行仍保持选择；Source 数量不与 reference 数量混淆。
+- [x] Podcasts & Interviews 与其他类别拥有完全相同的可选行为，不产生每次必须访问 GQ 的限制。
+- [x] 新研究提交规范的新类别；现有研究不会因切换来源菜单而重置结果、筛选或参考包。
+- [x] 桌面双列 Cards、窄屏堆叠、Recent Research、只读详情、拖拽与 PPTX 下载均沿用当前体验，不新增配置面板。
+
+实施与验证记录：
+
+- 删除前端硬编码的 7 类列表，按 `/source-categories` 的名称、顺序和默认选中状态显示 8 类；成功的元数据按会话缓存，重运行与研究切换不重复加载，也不触发额外 OpenAI 调用。
+- 使用独立于控件生命周期的 `research_source_choices` 保存已提交的偏好，并以固定控件 key 恢复来源选择。保留原表单批量提交行为；空来源在 Find References 时明确提示，保持空选择且不提交后端搜索。新建研究与返回历史不会改动已有参考包草稿。
+- 元数据失败或响应无效时不回退到旧列表，不启用搜索；保留创意和约束输入，使用表单内 Retry Sources 一并提交待保存输入并重试元数据，避免外部按钮重运行丢失未提交内容。已保存研究的浏览不依赖新建表单的元数据加载。
+- 历史和新结果的 Source 筛选继续使用各研究已有的实际 platform 值，未切换为 source_category 筛选；原控件 key、选择状态、过滤后的 Pack、只读详情及 PPTX 流程保持原样。
+- 完整回归 **230 项通过**，覆盖 8 类默认值、取消项与导航持久化、空选择、不合法/失败元数据、重试保留输入、元数据缓存及全部既有后端/前端功能；代码与格式检查通过。
+- Chrome 使用独立的 4 条离线参考，验证默认 8 类、原生移除 Podcasts、表单校验重运行后仍保留取消项，以及 1440px 桌面与 390px 窄屏表单无横向溢出；同时通过旧平台筛选、详情零额外请求、连续拖拽、历史管理和 PPTX 精确顺序检查，卡片布局另覆盖 1200/1101/1024/768/390px。
+- 浏览器验收改用系统临时目录，退出时关闭测试进程树并自动删除专用 Chrome profile，防止缓存再次堆积到项目 `data`；本轮未调用 OpenAI、未修改用户研究，Curated Seeds 未接入。README 已更新 8 类用户说明和元数据重试步骤。
 
 ### 12.7 Migration Phase 4 — Testing
 
