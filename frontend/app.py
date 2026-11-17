@@ -575,7 +575,7 @@ def result_panel():
     st.html('<a class="rf-pack-shortcut" href="#your-pack">View Your Pack</a>')
     with st.container(key="research_workspace"):
         results, pack = st.columns([7, 3], gap="medium")
-        with results, st.container(gap="xsmall"):
+        with results, st.container(key="reference_results", gap="xsmall"):
             with st.container(key="results_summary", gap="xxsmall"):
                 active_filters = len(st.session_state.get(f"source_filter_{run['id']}", [])) + len(
                     st.session_state.get(f"strand_filter_{run['id']}", [])
@@ -583,16 +583,18 @@ def result_panel():
                 with st.container(
                     key=f"results_heading_{run['id']}",
                     horizontal=True,
-                    wrap=False,
+                    wrap=True,
                     gap="small",
+                    horizontal_alignment="distribute",
                     vertical_alignment="center",
                 ):
-                    st.subheader("Reference Results")
+                    st.subheader("Reference Results", width="content")
                     with st.popover(
                         str(active_filters) if active_filters else "",
                         icon=":material/tune:",
                         type="tertiary",
                         key=f"result_filters_{run['id']}",
+                        width=80 if active_filters else 48,
                         help=f"Filter references ({active_filters} selected values)"
                         if active_filters
                         else "Filter references",

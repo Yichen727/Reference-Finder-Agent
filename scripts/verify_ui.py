@@ -357,6 +357,15 @@ def main():
             overflow:document.documentElement.scrollWidth>innerWidth};
         })()"""
         desktop = cdp.evaluate(geometry)
+        scroll_regions = """[...document.querySelectorAll('.st-key-reference_results *')]
+          .filter(e=>e.clientWidth &&
+            ((['auto','scroll'].includes(getComputedStyle(e).overflowX) && e.scrollWidth>e.clientWidth) ||
+             (['auto','scroll'].includes(getComputedStyle(e).overflowY) && e.scrollHeight>e.clientHeight)))
+          .map(e=>({key:e.className, text:e.innerText.slice(0,60),
+            overflowX:getComputedStyle(e).overflowX, overflowY:getComputedStyle(e).overflowY,
+            width:e.clientWidth, scrollWidth:e.scrollWidth,
+            height:e.clientHeight, scrollHeight:e.scrollHeight}))"""
+        assert not cdp.evaluate(scroll_regions), cdp.evaluate(scroll_regions)
         assert desktop["direction"] == "row"
         assert abs(desktop["previews"][0]["y"] - desktop["previews"][1]["y"]) < 2, desktop
         assert desktop["previews"][1]["x"] > desktop["previews"][0]["x"]
@@ -401,7 +410,10 @@ def main():
         assert abs(actions[2]["x"] + actions[2]["w"] - footer) < 2, actions
         assert max(action["h"] for action in actions) - min(action["h"] for action in actions) < 2, actions
         cdp.screenshot("desktop.png")
-        filter_button = f"document.querySelector('.st-key-result_filters_{run.id} button')"
+        filter_button = (
+            f"([...document.querySelectorAll('.st-key-result_filters_{run.id} button')]"
+            ".find(button=>button.getBoundingClientRect().width>0))"
+        )
         assert cdp.evaluate(f"""(() => {{
           const heading=document.querySelector('.st-key-results_heading_{run.id}');
           const title=heading.querySelector('h3').getBoundingClientRect();
@@ -415,7 +427,7 @@ def main():
         wait_until(
             lambda: cdp.evaluate("document.querySelectorAll('[class*=st-key-card_select_]').length===3")
         )
-        assert cdp.pack_state() == before_filters
+        wait_until(lambda: cdp.pack_state() == before_filters)
         assert cdp.evaluate(filter_button + ".innerText.includes('1')")
         assert cdp.evaluate(
             "document.querySelector('.st-key-results_summary').innerText"
@@ -425,14 +437,14 @@ def main():
         wait_until(
             lambda: cdp.evaluate("document.querySelectorAll('[class*=st-key-card_select_]').length===0")
         )
-        assert cdp.pack_state() == before_filters
+        wait_until(lambda: cdp.pack_state() == before_filters)
         assert cdp.evaluate(filter_button + ".innerText.includes('2')")
         cdp.screenshot("filter-popover.png")
         cdp.click("Clear Filters")
         wait_until(
             lambda: cdp.evaluate("document.querySelectorAll('[class*=st-key-card_select_]').length===4")
         )
-        assert cdp.pack_state() == before_filters
+        wait_until(lambda: cdp.pack_state() == before_filters)
         assert api_count() == calls_before_filters
         assert not cdp.evaluate(filter_button + ".innerText.includes('2')")
         cdp.evaluate(filter_button + ".click()")
@@ -533,6 +545,7 @@ def main():
             )
             time.sleep(0.4)
             sample = cdp.evaluate(geometry)
+            assert not cdp.evaluate(scroll_regions), (width, cdp.evaluate(scroll_regions))
             samples[str(width)] = sample
             assert sample["direction"] == ("row" if width > 1100 else "column"), sample
             assert not sample["overflow"], sample
@@ -548,17 +561,22 @@ def main():
             assert cdp.evaluate(label_alignment), f"Text baselines differ at {width}px"
             assert cdp.evaluate(icon_alignment), f"Add/check icons are off-centre at {width}px"
             assert cdp.evaluate(compact_header), f"Results header is not compact at {width}px"
+            cdp.evaluate("document.querySelector('[data-testid=stMain]').scrollTop=0")
+            cdp.screenshot(f"width-{width}.png")
             assert cdp.evaluate(f"""(() => {{
               const row=document.querySelector('.st-key-results_heading_{run.id}').getBoundingClientRect();
               const icon=({filter_button}).getBoundingClientRect();
-              return icon.right<=row.right+1 && icon.width<100;
-            }})()"""), f"Filter trigger overflows at {width}px"
+              return icon.right<=row.right+1 && icon.width<100 &&
+                Math.abs(icon.top+icon.height/2-row.top-row.height/2)<2;
+            }})()"""), cdp.evaluate(f"""(() => {{
+              const row=document.querySelector('.st-key-results_heading_{run.id}');
+              return {{width:{width}, row:row.getBoundingClientRect().toJSON(),
+                button:({filter_button}).getBoundingClientRect().toJSON()}};
+            }})()""")
             assert cdp.evaluate(f"""(() => {{
               const label=document.querySelector('.st-key-card_actions_{run.results[0].id} a p');
               return !!label && label.scrollWidth <= label.clientWidth + 1;
             }})()"""), f"Link label is clipped at {width}px"
-            cdp.evaluate("document.querySelector('[data-testid=stMain]').scrollTop=0")
-            cdp.screenshot(f"width-{width}.png")
         cdp.call(
             "Emulation.setDeviceMetricsOverride", width=1440, height=1000, deviceScaleFactor=1, mobile=False
         )
