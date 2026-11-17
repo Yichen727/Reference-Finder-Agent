@@ -82,7 +82,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             content={
                 "error": {
                     "code": "validation_error",
-                    "message": "Check the request fields and reference limit (1–15).",
+                    "message": f"Check the request fields and reference limit (1–{config.max_references}).",
                     "fields": fields,
                 }
             },

@@ -169,7 +169,7 @@ def seed(config):
                 "Cinematic Product Launch Film",
             ]
         ):
-            record, _ = completed_run(client, count=12 if index == 0 else 3, key=f"ui-review-{index}")
+            record, _ = completed_run(client, count=4 if index == 0 else 3, key=f"ui-review-{index}")
             brief = workflow.brief(record["brief_id"])
             brief.concept = prompt
             workflow.repository.put("brief", brief)
@@ -288,13 +288,49 @@ def main():
         cdp.call(
             "Emulation.setDeviceMetricsOverride", width=1440, height=1000, deviceScaleFactor=1, mobile=False
         )
+        repository = Repository(config.data_dir / "reference_finder.sqlite3")
+        running = type(run).model_validate(repository.get("run", run.id))
+        running.status, running.stage = "running", "starting_external_search"
+        repository.put("run", running)
+        assert read_json("http://127.0.0.1:8100/health")["max_references"] == 20
         cdp.call("Page.navigate", url=f"http://127.0.0.1:8601/?run={run.id}")
+        for stage, label, value in [
+            ("starting_external_search", "Selecting Sources", 20),
+            ("searching_1_of_4", "Searching References", 40),
+            ("checking_public_pages", "Verifying & Ranking", 60),
+        ]:
+            running.stage = stage
+            repository.put("run", running)
+            wait_until(
+                lambda: cdp.evaluate(
+                    f"document.body.innerText.includes({json.dumps(label)}) && "
+                    f"document.querySelector('[role=progressbar]')?.getAttribute('aria-valuenow')==='{value}'"
+                )
+            )
+            assert not cdp.evaluate("!!document.querySelector('.st-key-pack_panel')")
+            assert not cdp.evaluate(
+                "[...document.querySelectorAll('button')].some(e=>e.innerText==='Find References')"
+            )
+        cdp.screenshot("search-progress.png")
+        cdp.call(
+            "Emulation.setDeviceMetricsOverride", width=390, height=1000, deviceScaleFactor=1, mobile=False
+        )
+        time.sleep(0.3)
+        assert cdp.evaluate("document.documentElement.scrollWidth<=innerWidth")
+        cdp.screenshot("search-progress-narrow.png")
+        cdp.call(
+            "Emulation.setDeviceMetricsOverride", width=1440, height=1000, deviceScaleFactor=1, mobile=False
+        )
+        running.status = running.stage = "completed"
+        repository.put("run", running)
         wait_until(
             lambda: cdp.evaluate(
                 "!!document.querySelector('.st-key-pack_panel') && "
-                "document.querySelectorAll('[class*=st-key-card_select_]').length===12"
+                "document.querySelectorAll('[class*=st-key-card_select_]').length===4"
             )
         )
+        assert not cdp.evaluate("!!document.querySelector('[role=progressbar]')")
+        print("Actual stage progress, narrow layout and transition to 4 result cards passed", flush=True)
         wait_until(lambda: cdp.evaluate(f"!!({PACK_ROOT})?.querySelector('.pack-row')"))
         time.sleep(0.5)
         compact_header = """(() => {
@@ -327,7 +363,7 @@ def main():
         assert all(abs(preview["w"] / preview["h"] - 16 / 9) < 0.02 for preview in desktop["previews"])
         assert cdp.evaluate(
             "document.querySelectorAll('h1').length===1 && "
-            "document.querySelector('h1').innerText==='Reference Finder'"
+            "document.querySelector('h1').innerText==='Atomized Reference Finder'"
         )
         action_geometry = f"""[...document.querySelector('.st-key-card_actions_{run.results[0].id}')
           .querySelectorAll('button,a')].map(e=>e.getBoundingClientRect())
@@ -377,13 +413,13 @@ def main():
         cdp.evaluate(filter_button + ".click()")
         cdp.choose_multiselect(f"source_filter_{run.id}", "Vimeo")
         wait_until(
-            lambda: cdp.evaluate("document.querySelectorAll('[class*=st-key-card_select_]').length===11")
+            lambda: cdp.evaluate("document.querySelectorAll('[class*=st-key-card_select_]').length===3")
         )
         assert cdp.pack_state() == before_filters
         assert cdp.evaluate(filter_button + ".innerText.includes('1')")
         assert cdp.evaluate(
             "document.querySelector('.st-key-results_summary').innerText"
-            ".includes('11 Results · Human Side of AI')"
+            ".includes('3 Results · Human Side of AI')"
         )
         cdp.choose_multiselect(f"strand_filter_{run.id}", "Craft")
         wait_until(
@@ -394,7 +430,7 @@ def main():
         cdp.screenshot("filter-popover.png")
         cdp.click("Clear Filters")
         wait_until(
-            lambda: cdp.evaluate("document.querySelectorAll('[class*=st-key-card_select_]').length===12")
+            lambda: cdp.evaluate("document.querySelectorAll('[class*=st-key-card_select_]').length===4")
         )
         assert cdp.pack_state() == before_filters
         assert api_count() == calls_before_filters
@@ -536,7 +572,7 @@ def main():
         )
         cdp.click("Human Side of AI")
         wait_until(
-            lambda: cdp.evaluate("document.querySelectorAll('[class*=st-key-card_select_]').length===12")
+            lambda: cdp.evaluate("document.querySelectorAll('[class*=st-key-card_select_]').length===4")
         )
         wait_until(
             lambda: (
@@ -609,7 +645,7 @@ def main():
             )
         )
         assert run.id not in [item["id"] for item in read_json("http://127.0.0.1:8100/search-runs")]
-        assert cdp.evaluate("document.querySelector('h1').innerText==='Reference Finder'")
+        assert cdp.evaluate("document.querySelector('h1').innerText==='Atomized Reference Finder'")
         cdp.screenshot("deleted-home.png")
         print(
             "Header, compact actions, square icon toggle, rename and confirmed deletion passed",

@@ -7,6 +7,7 @@ from frontend.api_client import APIClient, APIError
 from frontend.curation import EDIT_FIELDS, apply_pack_action, draft_from_run, selection_payload
 from frontend.layout import borrow_summary, preview_markup
 from frontend.pack_component import pack_list
+from frontend.search_progress import pipeline_stage, show_search_progress
 
 SOURCES = [
     "Vimeo",
@@ -273,19 +274,26 @@ def management_dialog():
 
 def submit_pending():
     pending = st.session_state["pending_research"]
-    if pending.get("strategy") is None:
-        with st.spinner("Understanding your idea..."):
+    area = st.empty()
+    try:
+        if pending.get("strategy") is None:
+            show_search_progress(0, "Understanding your idea and creative constraints.", area=area)
+            if pending.get("brief") is None:
+                pending["brief"] = client.request("POST", "/briefs", pending["brief_input"])
             pending["strategy"] = client.request("POST", f"/briefs/{pending['brief']['id']}/strategy")
-    run = client.request(
-        "POST",
-        "/search-runs",
-        {
-            "brief_id": pending["brief"]["id"],
-            "strategy": pending["strategy"],
-            "idempotency_key": pending["submission_key"],
-        },
-    )
-    activate_run(run["id"])
+        show_search_progress(1, "Using your brief and research plan to select search sources.", area=area)
+        run = client.request(
+            "POST",
+            "/search-runs",
+            {
+                "brief_id": pending["brief"]["id"],
+                "strategy": pending["strategy"],
+                "idempotency_key": pending["submission_key"],
+            },
+        )
+        activate_run(run["id"])
+    finally:
+        area.empty()
     st.rerun()
 
 
@@ -314,23 +322,28 @@ def brief_form(health):
         if not health["live_search_ready"]:
             st.error("The search service is unavailable. Please contact the workspace administrator.")
             return
-        brief = client.request(
-            "POST",
-            "/briefs",
-            {
+        # Persist the request before any network call and replace the submit form.
+        # Repeated click events cannot create a second submission or a new retry key.
+        st.session_state["pending_research"] = {
+            "brief_input": {
                 "concept": concept,
                 "constraints": constraints,
                 "preferred_sources": sources,
                 "requested_count": int(count),
             },
-        )
-        pending = {"brief": brief, "strategy": None, "submission_key": str(uuid4())}
-        st.session_state["pending_research"] = pending
+            "brief": None,
+            "strategy": None,
+            "submission_key": str(uuid4()),
+            "auto_start": True,
+        }
         close_detail()
-        submit_pending()
+        st.rerun()
 
 
 def resume_search():
+    if st.session_state["pending_research"].pop("auto_start", False):
+        submit_pending()
+        return
     st.info("Your idea is saved. Continue your search without submitting it again.")
     if st.button("Continue Search", type="primary"):
         submit_pending()
@@ -343,17 +356,8 @@ def poll_run(run_id):
         st.session_state["run"] = run
         if run["status"] not in {"queued", "running"}:
             st.rerun()
-        stage = run["stage"]
-        message = "Finding references for your idea..."
-        if stage == "queued":
-            message = "Your research is queued..."
-        elif stage == "organizing_search_evidence":
-            message = "Putting your references together..."
-        elif stage == "checking_public_pages":
-            message = "Checking source pages..."
-        elif stage == "ranking_and_deduplicating":
-            message = "Selecting distinct, useful references..."
-        st.info(message)
+        index, message = pipeline_stage(run["stage"])
+        show_search_progress(index, message)
     except APIError as error:
         display_error(error)
 
@@ -560,7 +564,14 @@ def result_panel():
             st.error("We could not complete this research. Please try a new search.")
         return
     draft = draft_for(run)
-    presentation = presentation_for(run)
+    area = None
+    if run["id"] not in st.session_state.get("presentations", {}):
+        area = show_search_progress(4, "Loading reference cards and available previews.")
+    try:
+        presentation = presentation_for(run)
+    finally:
+        if area is not None:
+            area.empty()
     st.html('<a class="rf-pack-shortcut" href="#your-pack">View Your Pack</a>')
     with st.container(key="research_workspace"):
         results, pack = st.columns([7, 3], gap="medium")

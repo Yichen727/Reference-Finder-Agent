@@ -15,10 +15,10 @@ from tests.fixtures import FixtureProvider
 
 
 def test_selection_export_roundtrip_and_restart(client, settings):
-    run, _ = completed_run(client, count=15)
-    assert len(run["results"]) == 15
+    run, _ = completed_run(client, count=20)
+    assert len(run["results"]) == 20
     assert all(not item["is_mock"] for item in run["results"])
-    chosen = [run["results"][2], run["results"][0]]
+    chosen = list(reversed(run["results"]))
     annotation = {**chosen[0]["annotation"], "what_to_borrow": "My edited creative principle"}
     response = client.put(
         f"/search-runs/{run['id']}/selection",
@@ -56,7 +56,7 @@ def test_selection_export_roundtrip_and_restart(client, settings):
 @pytest.mark.parametrize(
     "payload",
     [
-        {"concept": "private marker", "requested_count": 16},
+        {"concept": "private marker", "requested_count": 21},
         {"concept": "   "},
         {"concept": "private marker", "preferred_sources": []},
     ],

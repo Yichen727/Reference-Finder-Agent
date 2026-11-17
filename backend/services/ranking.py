@@ -5,6 +5,7 @@ import unicodedata
 from difflib import SequenceMatcher
 from urllib.parse import parse_qs, urlsplit
 
+from backend.core.limits import MAX_REFERENCES
 from backend.schemas.models import RankingDetails, ReferenceItem, StoredBrief
 
 NOISE = {"official", "film", "video", "case", "study", "watch", "vimeo", "youtube", "www", "com"}
@@ -200,7 +201,7 @@ def score_reference(item: ReferenceItem, brief: StoredBrief, valid_evidence: set
 def diverse_shortlist(items: list[ReferenceItem], limit: int) -> list[ReferenceItem]:
     pool = merge_works(items)
     selected = []
-    while pool and len(selected) < min(limit, 15):
+    while pool and len(selected) < min(limit, MAX_REFERENCES):
 
         def value(item):
             score = item.ranking.score

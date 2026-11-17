@@ -53,6 +53,9 @@ enter **Y**.
 
 1. **Enter your creative idea** and click **Find References**. Optionally use
    **Advanced Options** to choose sources, reference count, and creative constraints.
+   The five-stage indicator follows brief analysis, source selection, search,
+   verification/ranking, and result preparation. The bar counts completed stages;
+   it does not estimate time remaining. Results replace it when ready.
 2. **Browse the cards.** Use **Details** for the AI analysis, source evidence, and
    rights notes. Use **Link** to open the original work. The filter icon beside
    **Reference Results** filters by source or creative category.
@@ -62,7 +65,7 @@ enter **Y**.
 5. **Click Export Reference Pack**, then **Download Reference Pack (.docx)**.
    Export saves your selection and order. Use the Word document to create your PPTX manually.
 
-The default search requests 10 references; you can request up to 15. Some searches
+The default search requests 10 references; you can request up to 20. Some searches
 return fewer usable results. Sources include Vimeo, YouTube, Instagram, Pinterest,
 studio portfolios, production companies, and award archives. Internal case studies
 are planned for a later phase.

@@ -4,7 +4,8 @@ from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, Field, HttpUrl, field_validator, model_validator
 
-MAX_REFERENCES = 15
+from backend.core.limits import MAX_REFERENCES
+
 Text = Annotated[str, Field(max_length=6000)]
 Source = Literal[
     "Vimeo",

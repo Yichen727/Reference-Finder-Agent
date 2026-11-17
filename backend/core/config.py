@@ -4,6 +4,8 @@ from typing import Literal
 from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from backend.core.limits import MAX_REFERENCES
+
 ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -17,7 +19,7 @@ class Settings(BaseSettings):
     openai_search_model: str = "gpt-5.4-mini"
     search_provider: Literal["openai"] = "openai"
     request_timeout_seconds: float = Field(default=45, ge=1, le=120)
-    max_references: int = Field(default=15, ge=1, le=15)
+    max_references: int = Field(default=MAX_REFERENCES, ge=1, le=MAX_REFERENCES)
     preview_approved_domains: list[str] = Field(default_factory=list, max_length=100)
     search_query_limit: int = Field(default=4, ge=1, le=8)
     search_max_requests: int = Field(default=6, ge=2, le=12)

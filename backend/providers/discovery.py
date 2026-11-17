@@ -7,6 +7,7 @@ import openai
 
 from backend.core.config import ROOT, Settings
 from backend.core.errors import AppError
+from backend.core.limits import MAX_REFERENCES
 from backend.providers.base import ProgressCallback
 from backend.providers.openai_errors import safe_openai_errors
 from backend.schemas.models import (
@@ -337,7 +338,7 @@ class ExternalDiscovery:
                 context = {
                     "brief": brief.model_dump(exclude={"id", "created_at"}),
                     "strategy": strategy.model_dump(),
-                    "candidate_limit": min(15, max(8, brief.requested_count * 2)),
+                    "candidate_limit": min(MAX_REFERENCES, max(8, brief.requested_count * 2)),
                     "sources": [
                         {
                             "id": (note.page_evidence or note.evidence).id,
@@ -362,7 +363,7 @@ class ExternalDiscovery:
                             instructions=(ROOT / "prompts/discovery.txt").read_text(encoding="utf-8"),
                             input=json.dumps(context),
                             text_format=DiscoveryDraft,
-                            max_output_tokens=min(12500, 1400 + context["candidate_limit"] * 700),
+                            max_output_tokens=1400 + context["candidate_limit"] * 700,
                             store=False,
                             **kwargs,
                         ),

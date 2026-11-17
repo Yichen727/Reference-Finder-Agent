@@ -167,12 +167,12 @@ def test_diversity_can_add_a_complementary_execution_over_another_near_clone():
     assert all(item.ranking.reasons and item.ranking.selection_note for item in result)
 
 
-def test_final_shortlist_never_exceeds_fifteen():
+def test_final_shortlist_never_exceeds_twenty():
     items = [
         score(reference(title=f"Distinct Work {index}", url=f"https://studio.test/work/{index}"))
-        for index in range(20)
+        for index in range(25)
     ]
-    assert len(diverse_shortlist(items, 100)) == 15
+    assert len(diverse_shortlist(items, 100)) == 20
 
 
 def test_private_vimeo_hash_remains_in_alternate_link():

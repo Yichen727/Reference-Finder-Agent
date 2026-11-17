@@ -120,7 +120,7 @@ def reorder(app, run, ids):
 
 def test_home_is_simple_and_defaults_launch_with_one_click(bridge, client):
     app = open_app()
-    assert app.title[0].value == "Reference Finder"
+    assert app.title[0].value == "Atomized Reference Finder"
     assert all(not item.proto.expanded for item in app.expander)
     assert [item.label for item in app.main.button if item.proto.type == "primary"] == ["Find References"]
     area(app, "Describe your creative idea").input("An optimistic character-led campaign")
@@ -211,8 +211,11 @@ def test_lost_submission_response_reuses_the_same_run(bridge, client):
     bridge["lose_submission"] = True
     app = launch(open_app())
     assert app.error
+    assert not app.status and not app.get("progress")
     assert len(client.get("/search-runs").json()) == 1
+    requests = len(bridge["requests"])
     app.run()
+    assert len(bridge["requests"]) == requests
     button(app, "Continue Search").click().run()
     assert not app.exception
     assert len(client.get("/search-runs").json()) == 1
@@ -221,6 +224,147 @@ def test_lost_submission_response_reuses_the_same_run(bridge, client):
     ]
     assert len(submissions) == 2
     assert submissions[0]["idempotency_key"] == submissions[1]["idempotency_key"]
+    assert sum(method == "POST" and path == "/briefs" for method, path, _ in bridge["requests"]) == 1
+
+
+def test_progress_covers_analysis_source_selection_and_result_preparation(bridge, monkeypatch):
+    from frontend import search_progress
+
+    events = []
+    original_progress = search_progress.show_search_progress
+    original_request = APIClient.request
+
+    def progress(index, message, **kwargs):
+        events.append(("progress", index))
+        return original_progress(index, message, **kwargs)
+
+    def request(self, method, path, *args, **kwargs):
+        events.append((method, path))
+        return original_request(self, method, path, *args, **kwargs)
+
+    monkeypatch.setattr(search_progress, "show_search_progress", progress)
+    monkeypatch.setattr(APIClient, "request", request)
+    app = launch(open_app())
+    run = app.session_state["run"]
+    assert events.index(("progress", 0)) < events.index(("POST", "/briefs"))
+    assert events.index(("progress", 1)) < events.index(("POST", "/search-runs"))
+    assert events.index(("progress", 4)) < events.index(("GET", f"/search-runs/{run['id']}/presentation"))
+    assert not app.status and not app.get("progress")
+    assert card_count(app) == 3
+
+
+def test_running_progress_uses_pipeline_milestones_and_preserves_submission(bridge, client):
+    app = launch(open_app())
+    run = SearchRun.model_validate(app.session_state["run"])
+    submissions = [item for item in bridge["requests"] if item[0] == "POST"]
+    stages = [
+        ("queued", "Selecting Sources", 20),
+        ("starting_external_search", "Selecting Sources", 20),
+        ("searching_1_of_4", "Searching References", 40),
+        ("searching_2_of_4", "Searching References", 40),
+        ("checking_public_pages", "Verifying & Ranking", 60),
+        ("organizing_search_evidence", "Verifying & Ranking", 60),
+        ("ranking_and_deduplicating", "Verifying & Ranking", 60),
+    ]
+    for stage, label, value in stages:
+        run.status = "queued" if stage == "queued" else "running"
+        run.stage = stage
+        client.app.state.workflow.repository.put("run", run)
+        app.session_state["run"] = run.model_dump(mode="json")
+        app.run()
+        assert not app.exception
+        assert app.status[0].label == label and app.status[0].state == "running"
+        assert app.get("progress")[0].value == value
+        assert "Stages completed" in app.get("progress")[0].text
+        assert not any(item.label == "Find References" for item in app.button)
+        assert not card_count(app)
+        if stage == "searching_2_of_4":
+            assert any("source group 2 of 4" in item.value for item in app.caption)
+    assert [item for item in bridge["requests"] if item[0] == "POST"] == submissions
+    # Polling the same real stage does not advance the bar.
+    app.run()
+    assert app.get("progress")[0].value == 60
+    for status in ["completed", "partial"]:
+        run.status = run.stage = status
+        client.app.state.workflow.repository.put("run", run)
+        app.session_state["run"] = run.model_dump(mode="json")
+        app.run()
+        assert not app.status and not app.get("progress")
+        assert card_count(app) == 3
+
+
+@pytest.mark.parametrize("endpoint", ["/briefs", "/strategy"])
+def test_analysis_failure_clears_progress_and_retries_the_pending_request(
+    bridge, client, monkeypatch, endpoint
+):
+    original_request = APIClient.request
+    failure = {"pending": True}
+
+    def request(self, method, path, *args, **kwargs):
+        if failure["pending"] and method == "POST" and path.endswith(endpoint):
+            failure["pending"] = False
+            raise APIError("The search service could not complete this request.", status=503)
+        return original_request(self, method, path, *args, **kwargs)
+
+    monkeypatch.setattr(APIClient, "request", request)
+    app = launch(open_app())
+    assert app.error and not app.exception
+    assert not app.status and not app.get("progress")
+    key = app.session_state["pending_research"]["submission_key"]
+    app.run()
+    assert not any(item.label == "Find References" for item in app.button)
+    button(app, "Continue Search").click().run()
+    assert not app.exception
+    assert card_count(app) == 3
+    assert len(client.get("/search-runs").json()) == 1
+    submission = next(
+        payload for method, path, payload in bridge["requests"] if path == "/search-runs" and method == "POST"
+    )
+    assert submission["idempotency_key"] == key
+
+
+@pytest.mark.parametrize(
+    "status,code", [("failed", "no_eligible_references"), ("failed", "run_failed"), ("interrupted", None)]
+)
+def test_failed_search_replaces_running_progress_with_an_error(bridge, client, status, code):
+    app = launch(open_app())
+    run = SearchRun.model_validate(app.session_state["run"])
+    run.status, run.stage = "running", "checking_public_pages"
+    client.app.state.workflow.repository.put("run", run)
+    app.session_state["run"] = run.model_dump(mode="json")
+    app.run()
+    assert app.status and app.get("progress")
+    run.status, run.stage, run.error_code = status, status, code
+    run.results = []
+    client.app.state.workflow.repository.put("run", run)
+    app.run()
+    assert not app.exception and app.error
+    assert not app.status and not app.get("progress")
+    assert not card_count(app)
+
+
+def test_polling_failure_clears_progress_and_recovers_without_resubmission(bridge, client, monkeypatch):
+    app = launch(open_app())
+    run = SearchRun.model_validate(app.session_state["run"])
+    run.status, run.stage = "running", "searching_1_of_4"
+    client.app.state.workflow.repository.put("run", run)
+    app.session_state["run"] = run.model_dump(mode="json")
+    app.run()
+    assert app.status
+    original_request = APIClient.request
+
+    def request(self, method, path, *args, **kwargs):
+        if method == "GET" and path == f"/search-runs/{run.id}":
+            raise APIError("Cannot connect to the backend.")
+        return original_request(self, method, path, *args, **kwargs)
+
+    monkeypatch.setattr(APIClient, "request", request)
+    app.run()
+    assert app.error and not app.get("progress") and not app.status
+    monkeypatch.setattr(APIClient, "request", original_request)
+    app.run()
+    assert app.status[0].label == "Searching References"
+    assert sum(method == "POST" and path == "/search-runs" for method, path, _ in bridge["requests"]) == 1
 
 
 def test_export_failure_after_save_keeps_the_new_version_for_retry(bridge, client):
@@ -463,7 +607,7 @@ def test_sidebar_research_navigation_preserves_previous_drafts_and_retry_key(bri
 
 
 def assert_header(app):
-    assert [item.value for item in app.title] == ["Reference Finder"]
+    assert [item.value for item in app.title] == ["Atomized Reference Finder"]
     assert (
         sum(item.value == "Turn your creative idea into a curated reference pack." for item in app.markdown)
         == 1
@@ -486,7 +630,7 @@ def test_header_persists_on_home_active_saved_and_progress_screens(bridge, clien
     restored.session_state["run"] = record.model_dump(mode="json")
     restored.run()
     assert_header(restored)
-    assert any("Finding references" in item.value for item in restored.info)
+    assert restored.status[0].label == "Finding References"
 
 
 def test_icon_selection_toggles_without_duplicates_or_annotation_changes(bridge):

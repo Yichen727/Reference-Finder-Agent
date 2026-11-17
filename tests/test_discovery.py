@@ -12,6 +12,7 @@ from streamlit.testing.v1 import AppTest
 
 from backend.main import create_app
 from backend.schemas.models import (
+    MAX_REFERENCES,
     Annotation,
     CreativeAssessment,
     DiscoveredReference,
@@ -199,7 +200,7 @@ def discovery_api(monkeypatch):
                     update={"title": "Invented work", "primary_evidence_id": "unknown"}
                 )
                 candidates.insert(0, fake)
-            return api_response({}, DiscoveryDraft(references=candidates[:15]))
+            return api_response({}, DiscoveryDraft(references=candidates[:MAX_REFERENCES]))
 
     monkeypatch.setattr(openai, "OpenAI", Client)
     return state
@@ -267,6 +268,18 @@ def test_live_search_records_sources_usage_and_exports(settings, discovery_api):
             assert call["store"] is False
             if "tools" in call:
                 assert call["tool_choice"] == "required" and call["max_tool_calls"] == 1
+
+
+def test_twenty_reference_request_expands_curation_capacity_without_filling_missing_evidence(
+    settings, discovery_api
+):
+    with TestClient(create_app(live_settings(settings))) as client:
+        run = execute(client, count=20)
+    # Four test-only source records remain four results, even when twenty are requested.
+    assert run["status"] == "partial" and len(run["results"]) == 4
+    curation = next(call for call in discovery_api["calls"] if "text_format" in call)
+    assert json.loads(curation["input"])["candidate_limit"] == 20
+    assert curation["max_output_tokens"] == 15400
 
 
 def test_only_grounded_ids_can_become_reference_urls(settings, discovery_api):
