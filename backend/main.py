@@ -26,8 +26,7 @@ from backend.schemas.models import (
 from backend.schemas.source_registry import SourceCategoryMetadata
 from backend.services.pptx_export import PPTX_MIME
 from backend.services.presentation import PresentationStore
-from backend.services.source_policy import SourcePolicy
-from backend.services.source_registry import load_source_registry
+from backend.services.source_registry import load_legacy_sources, load_source_registry
 from backend.services.thumbnails import ThumbnailService
 from backend.services.workflow import Workflow
 
@@ -124,11 +123,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.get("/sources")
     def sources():
-        return SourcePolicy().sources
+        return load_legacy_sources()
 
     @app.get("/source-categories", response_model=list[SourceCategoryMetadata])
     def source_categories():
-        # Migration metadata only; new search contracts are enabled in later phases.
         return load_source_registry().metadata()
 
     @app.post("/providers/openai/check")

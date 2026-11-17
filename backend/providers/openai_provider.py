@@ -5,7 +5,7 @@ from backend.core.config import ROOT, Settings
 from backend.core.errors import AppError
 from backend.providers.base import ProgressCallback
 from backend.providers.discovery import ExternalDiscovery
-from backend.schemas.models import SearchStrategy, StoredBrief, StrategyDraft
+from backend.schemas.models import SearchStrategy, StoredBrief, StrategyDraft, normalize_sources
 
 
 class OpenAIProvider:
@@ -26,7 +26,9 @@ class OpenAIProvider:
                 response = client.responses.parse(
                     model=self.settings.openai_model,
                     instructions=(ROOT / "prompts/strategy.txt").read_text(encoding="utf-8"),
-                    input=brief.model_dump_json(exclude={"id", "created_at"}),
+                    input=brief.model_copy(
+                        update={"preferred_sources": normalize_sources(brief.preferred_sources)}
+                    ).model_dump_json(exclude={"id", "created_at"}),
                     text_format=StrategyDraft,
                     max_output_tokens=2200,
                     store=False,
@@ -40,7 +42,7 @@ class OpenAIProvider:
             return SearchStrategy(
                 **response.output_parsed.model_dump(),
                 brief_id=brief.id,
-                preferred_sources=brief.preferred_sources,
+                preferred_sources=normalize_sources(brief.preferred_sources),
                 is_mock=False,
             )
         except openai.AuthenticationError:

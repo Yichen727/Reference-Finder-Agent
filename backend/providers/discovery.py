@@ -21,10 +21,11 @@ from backend.schemas.models import (
     StoredBrief,
     UsageStats,
     new_id,
+    normalize_sources,
 )
 from backend.services.page_verification import PageVerifier
 from backend.services.ranking import diverse_shortlist, merge_works, score_reference
-from backend.services.source_policy import SearchJob, SourcePolicy, canonical_url
+from backend.services.source_policy import SearchJob, SourcePolicy, canonical_url, publishing_platform
 
 
 class RequestBudget:
@@ -194,6 +195,9 @@ class ExternalDiscovery:
         if not self.settings.search_configured:
             raise AppError("openai_not_configured", "Configure the OpenAI key and model settings first.", 503)
         budget = RequestBudget(self.settings)
+        strategy = strategy.model_copy(
+            update={"preferred_sources": normalize_sources(strategy.preferred_sources)}
+        )
         outcome = SearchOutcome(
             coverage=[
                 SourceCoverage(
@@ -205,7 +209,7 @@ class ExternalDiscovery:
         )
         coverage = {item.category: item for item in outcome.coverage}
         notes: dict[str, SourceNote] = {}
-        jobs = self.policy.jobs(strategy, self.settings.search_query_limit)
+        jobs = self.policy.jobs(strategy, self.settings.search_query_limit, brief)
         prompt = (ROOT / "prompts/search.txt").read_text(encoding="utf-8")
         last_error = None
         try:
@@ -395,7 +399,7 @@ class ExternalDiscovery:
                     )
                 for category in outcome.coverage:
                     category.references_returned = sum(
-                        item.platform == category.category for item in outcome.results
+                        item.source_category == category.category for item in outcome.results
                     )
         except AppError as error:
             outcome.error_code = error.code
@@ -452,7 +456,12 @@ class ExternalDiscovery:
             title = normalized_words(candidate.title)
             supporting_text = normalized_words(evidence.page_title + " " + evidence.excerpt)
             url = str(evidence.source_url)
-            category = self.policy.category(url, candidate.platform, strategy.preferred_sources)
+            category = self.policy.category(
+                str(primary.evidence.source_url),
+                candidate.platform,
+                strategy.preferred_sources,
+                primary.categories,
+            )
             if primary.page_evidence and title not in normalized_words(
                 primary.page.title + " " + primary.page.text
             ):
@@ -510,7 +519,8 @@ class ExternalDiscovery:
                     id=new_id(),
                     title=candidate.title,
                     creator=creator,
-                    platform=category,
+                    platform=publishing_platform(url),
+                    source_category=category,
                     source_url=evidence.source_url,
                     tags=candidate.tags,
                     strand=candidate.strand if candidate.strand in valid_strands else primary.strand,

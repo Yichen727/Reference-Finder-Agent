@@ -2,7 +2,7 @@
 
 更新日期：2026-11-17
 当前进度：Phase 1–4 已实现；Streamlit 已支持真实外部搜索、双列视觉卡片、历史研究、拖拽参考包、只读分析及模板化 PPTX 导出。Mock 运行模式与示例数据未加入应用。
-来源迁移进度：第 12 节 **Source Architecture Migration — 8 Categories** 的原配置阶段已完成；按最新要求，本次仅推进 8 类 Sources 迁移，Curated Seeds 暂缓，不作为依赖或验收条件。已生成的 seed 草稿保留为后续资料，接下来解除配置加载对它的强制依赖，再完成 8 类后端与前端接入。内部案例 Phase 5 继续独立暂缓。
+来源迁移进度：第 12 节 **Source Architecture Migration — 8 Categories** 的 Migration Phase 1–2 已完成，后端支持 8 类 Sources、新旧类别兼容、受控调度和真实平台标识；Curated Seeds 已从注册表与搜索依赖中解除，继续暂缓。前端仍使用旧 7 类选项并由后端映射，等待 Phase 3 切换。内部案例 Phase 5 继续独立暂缓。
 Phase 4 已完成：每条 reference 使用 Single 模板生成一张可编辑 Slide，插入 Base 模板原第 2、3 页之间。4 条参考 / 7 页示例已通过 PowerPoint 实际打开、图片及文字边界检查；历史 DOCX 接口和文件下载保留兼容。
 最新调整：按用户要求将结果与参考包上限提升至 20，默认请求仍为 10；搜索与界面验证使用 4 个参考。新增原生五阶段进度，按真实流程推进，以已完成阶段数表示进展，不估算剩余时间；失败时清除进度，并沿用原提交键恢复搜索。
 语言约定：本计划保留中文；代码、界面、提示模板、README 和导出文档统一使用英文。
@@ -244,7 +244,7 @@ Web Search 支持来源信息和域名过滤，可用于受控的多来源查询
 | --- | --- | --- |
 | GET | `/health` | 服务、运行模式和配置是否就绪；不返回密钥 |
 | GET | `/sources` | 当前搜索使用的 7 类兼容配置；Migration Phase 1 保持响应结构不变 |
-| GET | `/source-categories` | 8 类迁移元数据，按显示顺序返回；Phase 1 尚不启用新类别搜索 |
+| GET | `/source-categories` | 8 类元数据，按显示顺序返回；后端已支持新类别，前端选项将在 Migration Phase 3 接入 |
 | POST | `/briefs` | 校验并保存 Brief |
 | POST | `/briefs/{brief_id}/strategy` | 生成可编辑的外部搜索策略 |
 | POST | `/search-runs` | 提交 Brief 和确认后的策略，返回运行 ID |
@@ -528,9 +528,9 @@ Phase 4 已将两份 PPTX 模板及版本清单复制到 `backend/templates/` �
 
 ## 12. Source Architecture Migration — 8 Categories
 
-状态：**Migration Phase 1 已完成，Phase 2–4 待实施。** 依据用户提供的来源迁移附件及现有仓库核对结果制定；按用户授权开始实施配置阶段。以下 Migration Phase 1–4 是来源迁移的四个步骤，与前文已完成的 MVP Phase 1–4 区分。8 类注册表目前作为独立元数据提供，不提前启用新搜索契约、智能调度或界面选项，不改写历史研究或迁移数据库。
+状态：**Migration Phase 1–2 已完成，Phase 3–4 待实施。** 以下 Migration Phase 1–4 是来源迁移的四个步骤，与前文已完成的 MVP Phase 1–4 区分。后端新搜索已使用 8 类，保留旧类别请求映射及历史读取；前端菜单尚未切换，不改写历史研究或迁移数据库。
 
-**最新范围约束（优先于原附件及已完成阶段记录）：只做 8 类 Sources 的迁移，Curated Seeds 暂时不实施。** 本次交付包含类别配置、后端校验/必要调度适配、前端选项和历史兼容；采用满足迁移的最小修改。seed 加载、筛选、抓取、合集拆解、专用预算及相关测试都不是迁移前置条件或验收项，不自动并入后续 Phase。已有 seed 文件和校验原型只是暂存资料；下一步须先解除 `load_source_registry()` 对 `curated_seeds.json` 的强制依赖，保证没有该文件也能完成 8 类元数据与搜索流程。是否继续做 Curated Seeds 等用户以后明确安排。
+**最新范围约束（优先于原附件及已完成阶段记录）：只做 8 类 Sources 的迁移，Curated Seeds 暂时不实施。** 本次交付包含类别配置、后端校验/必要调度适配、前端选项和历史兼容；采用满足迁移的最小修改。seed 加载、筛选、抓取、合集拆解、专用预算及相关测试都不是迁移前置条件或验收项，不自动并入后续 Phase。已有 seed 文件和校验原型只是暂存资料；Phase 2 已解除 `load_source_registry()` 对 `curated_seeds.json` 的强制依赖，文件缺失或损坏均不影响 8 类元数据及搜索。是否继续做 Curated Seeds 等用户以后明确安排。
 
 ### 12.1 目标与现状核对
 
@@ -581,7 +581,7 @@ Phase 4 已将两份 PPTX 模板及版本清单复制到 `backend/templates/` �
 
 ### 12.3 Curated Discovery Seeds — 暂缓，不属于本次迁移
 
-原配置阶段已生成 `config/curated_seeds.json`，仅作为暂存草稿保留，不在本次迁移中启用。以下 URL 和规则是未来可选方案，不要求实现、抓取或通过其验收；文件内的 `enabled=true` 不能自动开启功能。当前搜索未使用这些入口，注册表的强制加载依赖需要在下一步解除。内容为监督者推荐的发现线索，不是已核实的最终作品，也不赋予作品、奖项或图片额外可信度/使用权。
+原配置阶段已生成 `config/curated_seeds.json`，仅作为暂存草稿保留，不在本次迁移中启用。以下 URL 和规则是未来可选方案，不要求实现、抓取或通过其验收；文件内的 `enabled=true` 不能自动开启功能。当前注册表与搜索均不读取此文件，强制加载依赖已在 Phase 2 解除。内容为监督者推荐的发现线索，不是已核实的最终作品，也不赋予作品、奖项或图片额外可信度/使用权。
 
 **Awards & Winning Work — 4 个入口**
 
@@ -631,7 +631,7 @@ Video & Film、Podcasts & Interviews、Social & Visual Inspiration 暂无指定 
 验收标准：
 
 - [x] 注册表恰好含 8 类，名称、group、域名与 12.2 一致；不存在遗留类别成为第 9 个新选项。
-- [ ] 按最新范围解除 seed 文件依赖；缺失、禁用或不提供 `curated_seeds.json` 均不妨碍 8 类 Sources 加载与使用。
+- [x] 按最新范围解除 seed 文件依赖；缺失、禁用或不提供 `curated_seeds.json` 均不妨碍 8 类 Sources 加载与使用（由 Phase 2 完成）。
 - [x] 开放检索与受限域名检索可明确区分；新注册表接受全部 8 个 group，不依赖旧四组调度白名单（智能调度仍在 Phase 2）。
 - [x] 配置错误有明确反馈；源码和安装包均能读取配置，来源元数据不包含 Key 或敏感设置。
 
@@ -645,13 +645,15 @@ Video & Film、Podcasts & Interviews、Social & Visual Inspiration 暂无指定 
 
 ### 12.5 Migration Phase 2 — Backend
 
+**状态：已完成。** 新搜索使用 8 类规范类别；旧类别输入只在新建/执行边界映射，不批量更新历史记录。Curated Seeds 不进入注册表加载、搜索或任何工具调用。
+
 **影响文件：** `backend/schemas/models.py`、`backend/services/source_policy.py`、`backend/providers/openai_provider.py`、`backend/providers/discovery.py`、`backend/services/page_verification.py`、`backend/services/ranking.py`、`backend/services/thumbnails.py`、`backend/main.py`、`backend/services/workflow.py`；`prompts/strategy.txt`、`prompts/search.txt`、`prompts/discovery.txt`。导出服务仅在类别/平台兼容所必需的范围内适配，模板和排序权重不变。
 
 实施步骤：
 
 1. **新请求与历史读取分开：** 新搜索统一使用 8 类，输入兼容旧 7 类别名并去重；Brief、Strategy、coverage 的相关上限由 7 调整到 8。持久化对象继续识别旧值，不能只替换 Literal 导致历史研究返回校验错误。新请求拒绝未知类别、空选择或越过用户所选范围的策略。
-2. **区分类别与平台：** 引入兼容旧 JSON 的可选 `source_category` 字段，新结果填入规范类别，旧记录缺省时按旧映射读取；`platform` 保留实际发布平台/网站身份，必要时放宽为有长度限制、由可信 URL 推导的字符串。新结构化候选明确 category，平台由后端核对，不依赖模型自行编造；coverage 与选择范围使用 category，卡片和 PPTX 的来源仍显示真实 YouTube/Vimeo 等。仅增添带默认值的 JSON 字段，不新建 SQL 迁移或重写历史 payload。
-3. **沿用一次策略生成：** 从 Creative Brief 的目标、格式、风格与制作约束判断类别相关性，在现有策略输出中提供所选类别内的优先顺序和简短理由；新增策略字段须有历史缺省值。后端校验优先级、去重并补齐所选类别的可调度集合。策略无有效优先信息时使用确定性的兼容回退，不丢失新 group，也不额外调用 OpenAI 做分类。
+2. **区分类别与平台：** 引入兼容旧 JSON 的可选 `source_category` 字段，新结果填入规范类别，旧记录缺省为 None 并保留原 platform，必要分类时才使用旧映射；`platform` 改为有长度限制、由可信来源 URL 推导的发布平台/域名。保留候选结构中 platform 字段的类别含义以兼容原输出，最终结果的平台值由后端核对，不能由模型自行编造；coverage 与选择范围使用 category，卡片和 PPTX 仍显示真实 YouTube/Vimeo 等。仅增添带默认值的 JSON 字段，不新建 SQL 迁移或重写历史 payload。
+3. **沿用一次策略生成：** 现有策略调用增加 `source_priority`，只从所选 8 类中给出 Brief 相关的顺序；理由沿用已有 summary/strands，不另增一套解释结构。新增字段默认空列表兼容旧策略；后端检查重复与越界，并补齐所选类别的可调度集合。旧策略无优先信息时，按现有 Brief 文本和确定性顺序回退，不丢失新 group，不额外调用 OpenAI 做分类。
 4. **按需安排任务：** 用相关性和现有请求/时间预算选择 category × strand 组合，替换固定四组轮转。短片 Brief 可先查 Video & Film 与原作，互动项目可先查 Web & Interactive Design，访谈 Brief 可先查 Podcasts & Interviews。所有默认选中不等于八类每次都必须调用；选中 GQ 所在类别也不代表必查 GQ。开放 original_work 任务单独构造，不把其他限定域名任务意外放宽成全网搜索。
 5. **独立于 seeds：** 只使用所选类别的正常域名搜索或 original_work 开放发现；不实现 seed 筛选、抓取、文章拆解、专用预算或证据扩展流程，不因为 seed 文件不可用而中断搜索。
 6. **保留来源范围与原作追溯：** 未选类别不作为独立搜索任务。沿用现有作品与原作证据处理，仅做新分类兼容所必需的适配；保留发现类别、原作 URL 和证据，不能因实际发布平台不同而丢失已选类别的合格作品。此次不额外建设新的跨站发现系统。
@@ -662,12 +664,21 @@ Video & Film、Podcasts & Interviews、Social & Visual Inspiration 暂无指定 
 
 验收标准：
 
-- [ ] 8 类均可单独发起有效搜索计划；新请求最多 8 类，规范化后的重复类别只执行一次，未知/空选择有清楚反馈。
-- [ ] 类别优先级响应 Brief 且严格落在用户选择内；取消 Podcasts & Interviews 后没有其独立任务，默认全选不要求访问每个域名。
-- [ ] studios 的 `domains=[]` 保持开放发现，其他域名过滤有效；正常搜索和来源注册表均不依赖 seed 文件。
-- [ ] 原有作品核验、转载合并、证据 ID 与原始链接保持可核对，聚合文章本身不作为最终作品；本次不新增 seed 流程。
-- [ ] 请求次数、时间、候选池、页面预算和 20 条上限继续强制执行；无新增必需模型调用、依赖或数据库结构迁移。
-- [ ] 历史 7 类研究、保存选择、人工注释、标题、URL 恢复、旧导出与删除语义均可正常读取和操作，不被静默改写。
+- [x] 8 类均可单独发起有效搜索计划；新请求最多 8 类，规范化后的重复类别只执行一次，未知/空选择有清楚反馈。
+- [x] 类别优先级响应 Brief 且严格落在用户选择内；取消 Podcasts & Interviews 后没有其独立任务，默认全选不要求访问每个域名。
+- [x] studios 的 `domains=[]` 保持开放发现，其他域名过滤有效；正常搜索和来源注册表均不依赖 seed 文件。
+- [x] 原有作品核验、转载合并、证据 ID 与原始链接保持可核对，聚合文章本身不作为最终作品；本次不新增 seed 流程。
+- [x] 请求次数、时间、候选池、页面预算和 20 条上限继续强制执行；无新增必需模型调用、依赖或数据库结构迁移。
+- [x] 历史 7 类研究、保存选择、人工注释、标题、URL 恢复、旧导出与删除语义均可正常读取和操作，不被静默改写。
+
+实施与验证记录：
+
+- 后端枚举兼容 8 个规范类别与旧 7 个标签，Brief 新建、策略执行及覆盖统计使用规范类别；旧记录读取保留原始标签。Brief、Strategy、coverage 接受最多 8 类，旧别名合并后的重复项去重。新增的 source_priority 为空时沿用旧提交指纹格式，避免旧幂等键重试发生错误冲突。
+- SourcePolicy 从新注册表读取全部 8 个 group，按类别单独安排任务，开放域名任务不与受限域名混合。已有规划调用可提供类别优先级；旧策略使用本地匹配回退。用户未选类别不能由候选声明、搜索结果域名或提交的策略偷偷加入。
+- 最终 reference 的 source_category 记录发现类别，platform 从证据来源 URL 推导；页面跳转后的实际发布平台不取代发现范围。coverage 按去重后代表作品的主类别计数，其他合并来源继续保留在证据和 alternate_urls 中。新出版网站使用保守的来源可信度回退，原有评分权重及 Instagram/Pinterest 的较低来源权重保持不变。
+- 完整回归 **220 项通过**；随后补充策略越界与历史 Brief 重启检查，迁移专项 **21 项通过**。覆盖全部 8 类逐类搜索、官方域名/开放搜索、无 seed 或坏 seed 文件、类别优先级、旧记录与选择不改写、PPTX 导出及旧提交指纹重试；代码与格式检查通过。
+- 只重载后端并保留 Streamlit 会话；运行中的 OpenAPI 已确认接受 8 类、提供 source_category 与可选 source_priority。重载前后只读比对正式库中的 10 条 Brief/Research payload 完全一致，现有研究可读取、前端健康状态正常。没有执行付费搜索或消耗 OpenAI 额度；临时测试文件独立放置并清理。
+- 当前前端仍显示旧 7 类，后端接受并映射这些标签；8 类菜单、默认全选及前端元数据接入属于下一步 Migration Phase 3。Curated Seeds 继续暂缓。
 
 ### 12.6 Migration Phase 3 — Frontend
 

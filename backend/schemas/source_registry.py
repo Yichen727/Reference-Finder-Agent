@@ -1,4 +1,4 @@
-"""Source registry contracts; search contracts stay on the legacy set until Phase 2."""
+"""Canonical source categories and legacy labels for backward-compatible research."""
 
 import ipaddress
 import re

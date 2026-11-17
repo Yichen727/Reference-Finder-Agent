@@ -1,30 +1,20 @@
 from datetime import datetime, timezone
-from typing import Annotated, Literal
+from typing import Annotated, Literal, get_args
 from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, Field, HttpUrl, field_validator, model_validator
 
 from backend.core.limits import MAX_REFERENCES
+from backend.schemas.source_registry import LEGACY_CATEGORY_MAP, LegacySource, SourceCategory
 
 Text = Annotated[str, Field(max_length=6000)]
-Source = Literal[
-    "Vimeo",
-    "YouTube",
-    "Instagram",
-    "Pinterest",
-    "Studio portfolios",
-    "Production companies",
-    "Award archives",
-]
-SOURCES: list[Source] = [
-    "Vimeo",
-    "YouTube",
-    "Instagram",
-    "Pinterest",
-    "Studio portfolios",
-    "Production companies",
-    "Award archives",
-]
+Source = SourceCategory | LegacySource
+SOURCES: list[SourceCategory] = list(get_args(SourceCategory))
+
+
+def normalize_sources(values):
+    """Normalize new requests/execution only; historical stored objects retain their labels."""
+    return list(dict.fromkeys(LEGACY_CATEGORY_MAP.get(value, value) for value in values))
 
 
 def new_id() -> str:
@@ -55,7 +45,7 @@ class ReferenceBrief(Model):
     exclusions: Text = ""
     language: Literal["en"] = "en"
     preferred_sources: list[Source] = Field(
-        default_factory=lambda: SOURCES.copy(), min_length=1, max_length=7
+        default_factory=lambda: SOURCES.copy(), min_length=1, max_length=8
     )
     requested_count: int = Field(default=12, ge=1, le=MAX_REFERENCES)
 
@@ -75,13 +65,22 @@ class StrategyDraft(Model):
     summary: str = Field(min_length=1, max_length=2000)
     assumptions: list[Text] = Field(default_factory=list, max_length=10)
     strands: list[QueryStrand] = Field(min_length=1, max_length=5)
+    source_priority: list[SourceCategory] = Field(default_factory=list, max_length=8)
 
 
 class SearchStrategy(StrategyDraft):
     brief_id: str
-    preferred_sources: list[Source] = Field(min_length=1, max_length=7)
+    preferred_sources: list[Source] = Field(min_length=1, max_length=8)
     # Retained to read archived records and preserve the existing API shape.
     is_mock: bool = False
+
+    @model_validator(mode="after")
+    def selected_source_priority(self):
+        if len(self.source_priority) != len(set(self.source_priority)) or not set(
+            self.source_priority
+        ) <= set(normalize_sources(self.preferred_sources)):
+            raise ValueError("Source priorities must be unique and selected in this strategy")
+        return self
 
 
 class Evidence(Model):
@@ -150,7 +149,8 @@ class ReferenceItem(Model):
     title: Text
     creator: Text = ""
     source_type: Literal["external", "internal"] = "external"
-    platform: Source
+    platform: str = Field(min_length=1, max_length=120)
+    source_category: SourceCategory | None = None
     source_url: HttpUrl
     tags: list[Text] = Field(max_length=20)
     strand: Text
@@ -225,7 +225,7 @@ class SearchOutcome(Model):
     evidence: list[Evidence] = Field(default_factory=list, max_length=100)
     warnings: list[str] = Field(default_factory=list)
     usage: UsageStats = Field(default_factory=UsageStats)
-    coverage: list[SourceCoverage] = Field(default_factory=list, max_length=7)
+    coverage: list[SourceCoverage] = Field(default_factory=list, max_length=8)
     partial: bool = False
     error_code: str | None = None
     page_checks: list[PageCheck] = Field(default_factory=list, max_length=60)
@@ -260,7 +260,7 @@ class SearchRun(Model):
     warnings: list[str] = Field(default_factory=list)
     error_code: str | None = None
     usage: UsageStats = Field(default_factory=UsageStats)
-    coverage: list[SourceCoverage] = Field(default_factory=list, max_length=7)
+    coverage: list[SourceCoverage] = Field(default_factory=list, max_length=8)
     page_checks: list[PageCheck] = Field(default_factory=list, max_length=60)
     selection: Selection | None = None
     created_at: datetime = Field(default_factory=now)

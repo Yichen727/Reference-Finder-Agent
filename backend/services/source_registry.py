@@ -1,4 +1,4 @@
-"""Load validated, packaged category and discovery-seed configuration without network calls."""
+"""Load source configuration without network calls or a curated-seed dependency."""
 
 import json
 from dataclasses import dataclass
@@ -10,7 +10,6 @@ from pydantic import TypeAdapter, ValidationError
 
 from backend.core.errors import AppError
 from backend.schemas.source_registry import (
-    CuratedSeed,
     LegacySource,
     SourceCategory,
     SourceCategoryMetadata,
@@ -60,7 +59,6 @@ def validate_configuration(filename, value, contract, expected_names):
 @dataclass
 class SourceRegistry:
     categories: dict[SourceCategory, SourceDefinition]
-    seeds: dict[SourceCategory, list[CuratedSeed]]
 
     def metadata(self) -> list[SourceCategoryMetadata]:
         return [
@@ -88,20 +86,7 @@ def load_source_registry(directory: Path | None = None) -> SourceRegistry:
         raise configuration_error(
             "sources.json", "Only original_work uses an empty domain list for open discovery"
         )
-    seeds = validate_configuration(
-        "curated_seeds.json",
-        read_configuration("curated_seeds.json", directory),
-        dict[SourceCategory, list[CuratedSeed]],
-        names,
-    )
-    seen = set()
-    for category_seeds in seeds.values():
-        for seed in category_seeds:
-            identity = str(seed.url).rstrip("/")
-            if identity in seen:
-                raise configuration_error("curated_seeds.json", "Seed URLs must be unique across categories")
-            seen.add(identity)
-    return SourceRegistry(categories, seeds)
+    return SourceRegistry(categories)
 
 
 def load_legacy_sources(directory: Path | None = None) -> dict:

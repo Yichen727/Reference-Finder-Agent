@@ -106,8 +106,25 @@ def same_work(left: ReferenceItem, right: ReferenceItem) -> bool:
 
 
 def representative_priority(item: ReferenceItem):
-    originals = item.platform in {"Studio portfolios", "Production companies"}
+    originals = original_source(item)
     return (item.verification_status == "supported", originals, item.ranking.score if item.ranking else 0)
+
+
+def original_source(item: ReferenceItem) -> bool:
+    return item.platform in {"Studio portfolios", "Production companies"} or (
+        item.source_category == "Studios & Production Companies" and item.platform not in SOURCE_RATINGS
+    )
+
+
+def source_rating(item: ReferenceItem) -> float:
+    if item.platform in SOURCE_RATINGS:
+        return SOURCE_RATINGS[item.platform]
+    if original_source(item):
+        return SOURCE_RATINGS["Studio portfolios"]
+    if item.source_category == "Awards & Winning Work":
+        return SOURCE_RATINGS["Award archives"]
+    # A newly supported publisher is not automatically an original creator.
+    return 3.5
 
 
 def merge_works(items: list[ReferenceItem]) -> list[ReferenceItem]:
@@ -178,7 +195,7 @@ def score_reference(item: ReferenceItem, brief: StoredBrief, valid_evidence: set
         ]
         role = "close_match"
     checked = item.verification_status == "supported"
-    components["source"] = SOURCE_RATINGS[item.platform] if checked else 1.5
+    components["source"] = source_rating(item) if checked else 1.5
     if not checked:
         components["craft"] = min(components["craft"], 2.0)
     reasons.append(

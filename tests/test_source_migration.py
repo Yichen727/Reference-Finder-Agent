@@ -1,0 +1,249 @@
+import hashlib
+import json
+from importlib.resources import files
+from uuid import uuid4
+
+import pytest
+from fastapi.testclient import TestClient
+from pydantic import ValidationError
+
+from backend.main import create_app
+from backend.schemas.models import SOURCES, QueryStrand, SearchStrategy, StoredBrief
+from backend.services import source_registry
+from backend.services.ranking import score_reference
+from backend.services.source_policy import SourcePolicy, publishing_platform
+from tests.conftest import completed_run
+from tests.test_discovery import discovery_api as discovery_api
+from tests.test_discovery import execute, live_settings
+from tests.test_ranking import reference
+from tests.test_source_registry import EXPECTED_CATEGORIES
+
+
+def strategy(sources=None, priority=None):
+    return SearchStrategy(
+        brief_id=str(uuid4()),
+        summary="Find relevant creative works",
+        preferred_sources=sources or SOURCES,
+        source_priority=priority or [],
+        strands=[QueryStrand(name="Story", intent="Find concrete works", queries=["human story"])],
+    )
+
+
+@pytest.mark.parametrize("category", SOURCES)
+def test_each_category_is_searchable_with_only_its_selected_scope(settings, discovery_api, category):
+    settings.search_query_limit = 1
+    with TestClient(create_app(live_settings(settings))) as client:
+        run = execute(client, sources=[category], count=4)
+    assert len(run["results"]) == 1
+    item = run["results"][0]
+    assert item["source_category"] == category
+    assert item["platform"] == publishing_platform(item["source_url"])
+    assert item["platform"] not in SOURCES
+    assert run["coverage"][0]["references_returned"] == 1
+    assert run["usage"]["requests_attempted"] == 2  # Search and curation; no new planning call here.
+    call = next(call for call in discovery_api["calls"] if "tools" in call)
+    assert json.loads(call["input"])["source_categories"] == [category]
+    domains = EXPECTED_CATEGORIES[category][1]
+    if domains:
+        assert call["tools"][0]["filters"]["allowed_domains"] == domains
+    else:
+        assert "filters" not in call["tools"][0]
+
+
+@pytest.mark.parametrize("seed_state", ["missing", "invalid"])
+def test_registry_metadata_and_search_do_not_read_or_require_seeds(
+    settings, discovery_api, tmp_path, monkeypatch, seed_state
+):
+    (tmp_path / "sources.json").write_text(
+        files("config").joinpath("sources.json").read_text(encoding="utf-8"), encoding="utf-8"
+    )
+    if seed_state == "invalid":
+        (tmp_path / "curated_seeds.json").write_text("Not JSON", encoding="utf-8")
+    monkeypatch.setattr(source_registry, "files", lambda package: tmp_path)
+    read = source_registry.read_configuration
+    read_names = []
+
+    def checked_read(filename, directory):
+        assert filename != "curated_seeds.json"
+        read_names.append(filename)
+        return read(filename, directory)
+
+    monkeypatch.setattr(source_registry, "read_configuration", checked_read)
+    settings.search_query_limit = 1
+    with TestClient(create_app(live_settings(settings))) as client:
+        assert len(client.get("/source-categories").json()) == 8
+        run = execute(client, sources=["Web & Interactive Design"], count=4)
+    assert run["results"] and set(read_names) == {"sources.json"}
+
+
+def test_aliases_are_normalized_only_for_new_briefs_and_duplicates_are_collapsed(client):
+    response = client.post(
+        "/briefs",
+        json={
+            "concept": "A film",
+            "requested_count": 4,
+            "preferred_sources": [
+                "YouTube",
+                "Vimeo",
+                "Video & Film",
+                "Studio portfolios",
+                "Production companies",
+            ],
+        },
+    )
+    assert response.status_code == 201
+    assert response.json()["preferred_sources"] == ["Video & Film", "Studios & Production Companies"]
+
+
+def test_submitted_strategy_cannot_expand_the_briefs_selected_sources(client):
+    brief = client.post("/briefs", json={"concept": "A film", "preferred_sources": ["YouTube"]}).json()
+    proposed = strategy(["Social & Visual Inspiration"]).model_dump()
+    proposed["brief_id"] = brief["id"]
+    response = client.post(
+        "/search-runs", json={"brief_id": brief["id"], "strategy": proposed, "idempotency_key": str(uuid4())}
+    )
+    assert response.status_code == 422 and response.json()["error"]["code"] == "source_mismatch"
+    assert client.get("/search-runs").json() == []
+
+
+def test_all_groups_can_be_scheduled_and_priorities_never_expand_scope():
+    policy = SourcePolicy()
+    assert {job.categories[0] for job in policy.jobs(strategy(), 8)} == set(SOURCES)
+    preferred = ["Video & Film", "Podcasts & Interviews"]
+    jobs = policy.jobs(strategy(preferred, ["Podcasts & Interviews"]), 2)
+    assert jobs[0].domains == ["gq.com", "gq-magazine.co.uk"]
+    assert jobs[1].categories == ["Video & Film"]
+    with pytest.raises(ValidationError):
+        strategy(["Video & Film"], ["Podcasts & Interviews"])
+    with pytest.raises(ValidationError):
+        strategy(preferred, ["Video & Film", "Video & Film"])
+    without_podcast = [category for category in SOURCES if category != "Podcasts & Interviews"]
+    assert all(
+        "Podcasts & Interviews" not in job.categories for job in policy.jobs(strategy(without_podcast), 8)
+    )
+
+
+@pytest.mark.parametrize(
+    "prompt,first",
+    [
+        ("An interactive website", "Web & Interactive Design"),
+        ("A podcast interview", "Podcasts & Interviews"),
+    ],
+)
+def test_legacy_strategies_get_relevant_local_fallback_without_an_extra_model_call(prompt, first):
+    jobs = SourcePolicy().jobs(strategy(), 4, StoredBrief(concept=prompt))
+    assert jobs[0].categories == [first]
+    assert len(jobs) <= 4
+
+
+def test_existing_planning_call_provides_priority_within_the_same_search_budget(settings, discovery_api):
+    discovery_api["source_priority"] = ["Web & Interactive Design"]
+    with TestClient(create_app(live_settings(settings))) as client:
+        run = execute(client, count=4)
+    search_calls = [call for call in discovery_api["calls"] if "tools" in call]
+    assert search_calls[0]["tools"][0]["filters"]["allowed_domains"] == [
+        "awwwards.com",
+        "siteinspire.com",
+        "webflow.com",
+    ]
+    assert run["strategy"]["source_priority"] == ["Web & Interactive Design"]
+    assert run["usage"]["requests_attempted"] == 5
+
+
+def test_out_of_scope_model_priority_is_rejected_before_search(settings, discovery_api):
+    discovery_api["source_priority"] = ["Podcasts & Interviews"]
+    with TestClient(create_app(live_settings(settings))) as client:
+        brief = client.post(
+            "/briefs", json={"concept": "A film", "preferred_sources": ["Video & Film"]}
+        ).json()
+        response = client.post(f"/briefs/{brief['id']}/strategy")
+    assert response.status_code == 502
+    assert discovery_api["web_attempts"] == 0
+
+
+def test_domain_attribution_rejects_relabelled_unselected_sources():
+    policy = SourcePolicy()
+    studios = ["Studios & Production Companies"]
+    assert policy.category("https://youtube.com/watch?v=abc", studios[0], studios) is None
+    assert policy.category("https://thedrum.com/work/example", studios[0], studios) is None
+    assert policy.category("https://studio.test/work/example", studios[0], studios) == studios[0]
+    assert (
+        policy.category("https://vimeo.com/1234", "Video & Film", SOURCES, ["Awards & Winning Work"]) is None
+    )
+
+
+def test_new_publisher_does_not_crash_ranking_or_upgrade_repost_authority():
+    publisher = reference(url="https://thedrum.com/work/shared-futures")
+    publisher.platform, publisher.source_category = "thedrum.com", "Creative Publications"
+    assert score_reference(publisher, StoredBrief(concept="A warm film"), set(publisher.evidence_ids))
+    assert publisher.ranking.components["source"] == 3.5
+    publisher.platform, publisher.source_category = "Pinterest", "Social & Visual Inspiration"
+    assert score_reference(publisher, StoredBrief(concept="A warm film"), set(publisher.evidence_ids))
+    assert publisher.ranking.components["source"] == 2.5
+
+
+def test_legacy_stored_research_and_selection_are_read_without_rewriting(client):
+    run, request = completed_run(client, count=4)
+    selected = [item["id"] for item in reversed(run["results"])]
+    client.put(
+        f"/search-runs/{run['id']}/selection", json={"ordered_ids": selected, "expected_version": 0}
+    ).raise_for_status()
+    repository = client.app.state.workflow.repository
+    stored_brief = repository.get("brief", run["brief_id"])
+    stored_brief["preferred_sources"] = ["Vimeo", "YouTube", "Studio portfolios"]
+    stored = repository.get("run", run["id"])
+    stored["strategy"]["preferred_sources"] = ["Vimeo", "YouTube", "Studio portfolios"]
+    stored["strategy"].pop("source_priority", None)
+    stored["coverage"] = [
+        {"category": "Vimeo", "queries_attempted": 1, "references_returned": 4, "note": "Historical coverage"}
+    ]
+    for item in stored["results"]:
+        item["platform"] = "Vimeo"
+        item.pop("source_category", None)
+    with repository.connection() as connection:
+        connection.execute(
+            "UPDATE records SET payload=? WHERE kind='brief' AND id=?",
+            (json.dumps(stored_brief), run["brief_id"]),
+        )
+        connection.execute(
+            "UPDATE records SET payload=? WHERE kind='run' AND id=?", (json.dumps(stored), run["id"])
+        )
+    restored = client.get(f"/search-runs/{run['id']}").json()
+    assert restored["strategy"]["preferred_sources"] == stored["strategy"]["preferred_sources"]
+    assert restored["selection"]["ordered_ids"] == selected
+    assert restored["coverage"][0]["category"] == "Vimeo"
+    assert all(item["platform"] == "Vimeo" for item in restored["results"])
+    response = client.post(f"/search-runs/{run['id']}/exports/pptx", json={"expected_selection_version": 1})
+    assert response.status_code == 201
+    assert repository.get("run", run["id"]) == stored
+    with TestClient(create_app(client.app.state.workflow.settings)) as restarted:
+        assert (
+            restarted.get(f"/briefs/{run['brief_id']}").json()["preferred_sources"]
+            == stored_brief["preferred_sources"]
+        )
+        assert restarted.get(f"/search-runs/{run['id']}").json()["selection"]["ordered_ids"] == selected
+    assert repository.get("brief", run["brief_id"]) == stored_brief
+    assert repository.get("run", run["id"]) == stored
+
+
+def test_pre_migration_submission_fingerprint_can_be_retried(client):
+    brief = client.post(
+        "/briefs", json={"concept": "A film", "requested_count": 4, "preferred_sources": ["YouTube"]}
+    ).json()
+    old_strategy = strategy(["YouTube"]).model_dump()
+    old_strategy["brief_id"] = brief["id"]
+    old_strategy.pop("source_priority")
+    request = {"brief_id": brief["id"], "strategy": old_strategy, "idempotency_key": str(uuid4())}
+    first = client.post("/search-runs", json=request)
+    first.raise_for_status()
+    fingerprint = hashlib.sha256(
+        json.dumps(
+            {key: value for key, value in request.items() if key != "idempotency_key"}, sort_keys=True
+        ).encode()
+    ).hexdigest()
+    with client.app.state.workflow.repository.connection() as connection:
+        stored = connection.execute(
+            "SELECT fingerprint FROM submissions WHERE key=?", (request["idempotency_key"],)
+        ).fetchone()[0]
+    assert stored == fingerprint
+    assert client.post("/search-runs", json=request).json()["id"] == first.json()["id"]

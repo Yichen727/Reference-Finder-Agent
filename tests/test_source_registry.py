@@ -5,8 +5,8 @@ from typing import get_args
 import pytest
 
 from backend.core.errors import AppError
-from backend.schemas.models import SOURCES, ReferenceBrief, Source
-from backend.schemas.source_registry import LEGACY_CATEGORY_MAP, SourceCategory, SourceGroup
+from backend.schemas.models import SOURCES, ReferenceBrief
+from backend.schemas.source_registry import LEGACY_CATEGORY_MAP, LegacySource, SourceCategory, SourceGroup
 from backend.services import source_registry
 from backend.services.source_policy import SourcePolicy
 from backend.services.source_registry import load_legacy_sources, load_source_registry
@@ -39,7 +39,7 @@ EXPECTED_CATEGORIES = {
 
 @pytest.fixture
 def configuration(tmp_path):
-    for filename in ["sources.json", "curated_seeds.json", "legacy_sources.json"]:
+    for filename in ["sources.json", "legacy_sources.json"]:
         (tmp_path / filename).write_text(
             files("config").joinpath(filename).read_text(encoding="utf-8"), encoding="utf-8"
         )
@@ -65,36 +65,18 @@ def test_registry_matches_the_eight_category_contract_and_display_order():
     assert [entry.name for entry in metadata if entry.open_discovery] == ["Studios & Production Companies"]
 
 
-def test_curated_seeds_are_discovery_only_and_do_not_expand_domain_lists():
-    registry = load_source_registry()
-    assert {category: len(seeds) for category, seeds in registry.seeds.items()} == {
-        "Video & Film": 0,
-        "Awards & Winning Work": 4,
-        "Creative Publications": 2,
-        "Brand & Corporate Films": 4,
-        "Studios & Production Companies": 1,
-        "Web & Interactive Design": 1,
-        "Podcasts & Interviews": 0,
-        "Social & Visual Inspiration": 0,
-    }
-    assert all(seed.enabled and seed.purpose for seeds in registry.seeds.values() for seed in seeds)
-    awards = registry.categories["Awards & Winning Work"]
-    assert any(seed.url.host == "www.outbrain.com" for seed in registry.seeds["Awards & Winning Work"])
-    assert "outbrain.com" not in awards.domains
-
-
-def test_legacy_search_contract_and_source_policy_stay_on_seven_categories():
+def test_legacy_contract_is_readable_and_active_policy_uses_eight_categories():
     legacy = load_legacy_sources()
-    assert list(legacy) == SOURCES
-    assert set(LEGACY_CATEGORY_MAP) == set(get_args(Source)) == set(legacy)
+    assert list(legacy) == list(get_args(LegacySource))
+    assert set(LEGACY_CATEGORY_MAP) == set(get_args(LegacySource)) == set(legacy)
     assert set(LEGACY_CATEGORY_MAP.values()) <= set(get_args(SourceCategory))
-    assert SourcePolicy().sources == legacy
+    assert list(SourcePolicy().sources) == SOURCES
     assert legacy["Vimeo"]["domains"] == ["vimeo.com"]
     assert legacy["Studio portfolios"]["domains"] == []
     assert ReferenceBrief(concept="A film about collaboration").preferred_sources == SOURCES
 
 
-def test_category_metadata_is_ordered_read_only_and_does_not_enable_new_search_contracts(client, monkeypatch):
+def test_category_metadata_is_ordered_read_only_and_new_search_contracts_are_enabled(client, monkeypatch):
     monkeypatch.setattr(
         client.app.state.workflow.provider, "strategy", lambda *args: pytest.fail("No AI call")
     )
@@ -113,11 +95,11 @@ def test_category_metadata_is_ordered_read_only_and_does_not_enable_new_search_c
     assert client.get("/search-runs").json() == before
     assert (
         client.post("/briefs", json={"concept": "A film", "preferred_sources": ["Video & Film"]}).status_code
-        == 422
+        == 201
     )
 
 
-@pytest.mark.parametrize("filename", ["sources.json", "curated_seeds.json", "legacy_sources.json"])
+@pytest.mark.parametrize("filename", ["sources.json", "legacy_sources.json"])
 def test_missing_resources_have_a_clear_error(configuration, filename):
     (configuration / filename).unlink()
     loader = load_legacy_sources if filename == "legacy_sources.json" else load_source_registry
@@ -177,59 +159,6 @@ def test_malformed_or_duplicate_domains_are_rejected(configuration, domains):
     )
     with pytest.raises(AppError, match="domains"):
         load_source_registry(configuration)
-
-
-@pytest.mark.parametrize(
-    "url",
-    [
-        "file:///tmp/example",
-        "https://localhost/path",
-        "http://127.0.0.1/page",
-        "http://169.254.169.254/",
-        "https://[::1]/",
-        "https://user:pass@example.com/",
-        "https://example.com:8443/",
-        "https://example.com/page#fragment",
-        "https://example.com/\npage",
-    ],
-)
-def test_invalid_seed_urls_are_rejected(configuration, url):
-    change_configuration(
-        configuration, "curated_seeds.json", lambda value: value["Awards & Winning Work"][0].update(url=url)
-    )
-    with pytest.raises(AppError, match="curated_seeds.json"):
-        load_source_registry(configuration)
-
-
-@pytest.mark.parametrize("change", ["category", "duplicate", "missing_purpose", "enabled_type"])
-def test_invalid_seed_categories_duplicates_and_metadata_are_rejected(configuration, change):
-    def edit(value):
-        if change == "category":
-            value["Unknown Category"] = []
-        elif change == "duplicate":
-            value["Creative Publications"].append(value["Awards & Winning Work"][0].copy())
-        elif change == "missing_purpose":
-            del value["Awards & Winning Work"][0]["purpose"]
-        else:
-            value["Awards & Winning Work"][0]["enabled"] = "false"
-
-    change_configuration(configuration, "curated_seeds.json", edit)
-    with pytest.raises(AppError, match="curated_seeds.json"):
-        load_source_registry(configuration)
-
-
-def test_disabled_seed_is_retained_without_changing_category_domains(configuration):
-    change_configuration(
-        configuration,
-        "curated_seeds.json",
-        lambda value: value["Awards & Winning Work"][0].update(enabled=False),
-    )
-    registry = load_source_registry(configuration)
-    assert registry.seeds["Awards & Winning Work"][0].enabled is False
-    assert (
-        registry.categories["Awards & Winning Work"].domains
-        == EXPECTED_CATEGORIES["Awards & Winning Work"][1]
-    )
 
 
 def test_resources_resolve_without_the_repository_working_directory(tmp_path, monkeypatch):

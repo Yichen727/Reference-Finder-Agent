@@ -15,6 +15,7 @@ from backend.schemas.models import (
     Selection,
     SelectionInput,
     StoredBrief,
+    normalize_sources,
     now,
 )
 from backend.services.docx_export import render_docx
@@ -42,7 +43,9 @@ class Workflow:
                 f"This server allows at most {self.settings.max_references} references.",
                 422,
             )
-        brief = StoredBrief(**value.model_dump())
+        brief = StoredBrief(
+            **{**value.model_dump(), "preferred_sources": normalize_sources(value.preferred_sources)}
+        )
         self.repository.put("brief", brief)
         return brief
 
@@ -54,7 +57,9 @@ class Workflow:
             raise AppError(
                 "archived_strategy", "Start new research to generate a current search strategy.", 409
             )
-        if not set(request.strategy.preferred_sources) <= set(brief.preferred_sources):
+        if not set(normalize_sources(request.strategy.preferred_sources)) <= set(
+            normalize_sources(brief.preferred_sources)
+        ):
             raise AppError(
                 "source_mismatch",
                 "Strategy sources must be selected in the original brief.",
@@ -62,8 +67,14 @@ class Workflow:
             )
         if not self.settings.search_configured:
             raise AppError("openai_not_configured", "Configure the OpenAI key and model settings first.", 503)
-        run = SearchRun(brief_id=brief.id, strategy=request.strategy, mode=self.settings.app_mode)
+        strategy = request.strategy.model_copy(
+            update={"preferred_sources": normalize_sources(request.strategy.preferred_sources)}
+        )
+        run = SearchRun(brief_id=brief.id, strategy=strategy, mode=self.settings.app_mode)
         payload = request.model_dump(exclude={"idempotency_key"}, mode="json")
+        if not request.strategy.source_priority:
+            # Keep fingerprints compatible with submissions saved before this field existed.
+            payload["strategy"].pop("source_priority", None)
         fingerprint = hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
         result, created = self.repository.create_run(run, request.idempotency_key, fingerprint)
         return SearchRun.model_validate(result), created

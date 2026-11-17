@@ -1,11 +1,12 @@
 import ipaddress
+import re
 from dataclasses import dataclass
 from urllib.parse import unquote_plus, urlsplit, urlunsplit
 
 from pydantic import HttpUrl, TypeAdapter
 
-from backend.schemas.models import SearchStrategy, Source
-from backend.services.source_registry import load_legacy_sources
+from backend.schemas.models import SearchStrategy, Source, StoredBrief, normalize_sources
+from backend.services.source_registry import load_source_registry
 
 URL_ADAPTER = TypeAdapter(HttpUrl)
 
@@ -77,6 +78,19 @@ def domain_matches(url: str, domains: list[str]) -> bool:
     return any(host == domain or host.endswith("." + domain) for domain in domains)
 
 
+def publishing_platform(url: str) -> str:
+    """Derive display identity from the actual source, never a generated category label."""
+    for name, domains in {
+        "YouTube": ["youtube.com", "youtu.be"],
+        "Vimeo": ["vimeo.com"],
+        "Instagram": ["instagram.com"],
+        "Pinterest": ["pinterest.com", "pinterest.co.uk"],
+    }.items():
+        if domain_matches(url, domains):
+            return name
+    return (urlsplit(url).hostname or "Unknown source").lower().removeprefix("www.")[:120]
+
+
 @dataclass
 class SearchJob:
     strand: str
@@ -88,20 +102,45 @@ class SearchJob:
 
 class SourcePolicy:
     def __init__(self):
-        self.sources = load_legacy_sources()
+        self.sources = {
+            name: definition.model_dump() for name, definition in load_source_registry().categories.items()
+        }
 
-    def jobs(self, strategy: SearchStrategy, limit: int) -> list[SearchJob]:
-        groups: dict[str, list[Source]] = {}
-        for category in strategy.preferred_sources:
-            groups.setdefault(self.sources[category]["group"], []).append(category)
-        # Prioritise original work and video, then official awards and restricted social sources.
-        ordered = [
-            groups[group] for group in ["original_work", "video", "awards", "social"] if group in groups
-        ]
+    def jobs(self, strategy: SearchStrategy, limit: int, brief: StoredBrief | None = None) -> list[SearchJob]:
+        selected = normalize_sources(strategy.preferred_sources)
+        if not selected or any(category not in self.sources for category in selected):
+            raise ValueError("Select at least one registered source category")
+        # Reuse priorities from the existing planning call; legacy strategies get
+        # a small deterministic fallback, without another model request.
+        context = " ".join(
+            [strategy.summary, *([brief.concept, brief.format, brief.purpose] if brief else [])]
+        ).lower()
+        keywords = {
+            "video": r"\b(film|video|cinema|cinematic)\b",
+            "awards": r"\b(award|awards|winning)\b",
+            "editorial": r"\b(editorial|publication|publications|campaign)\b",
+            "brand_films": r"\b(brand|corporate)\b",
+            "original_work": r"\b(studio|director|production)\b",
+            "interactive": r"\b(interactive|website|web|digital experience)\b",
+            "podcast": r"\b(podcast|podcasts|interview|interviews|audio)\b",
+            "social": r"\b(social|reel|reels|instagram|pinterest)\b",
+        }
+        fallback = sorted(
+            selected,
+            key=lambda category: (
+                not bool(re.search(keywords[self.sources[category]["group"]], context)),
+                self.sources[category]["group"] != "original_work",
+            ),
+        )
+        ordered = list(
+            dict.fromkeys(
+                [*(category for category in strategy.source_priority if category in selected), *fallback]
+            )
+        )
         jobs = []
         seen = set()
         for index in range(limit):
-            categories = ordered[index % len(ordered)]
+            categories = [ordered[index % len(ordered)]]
             strand = strategy.strands[index % len(strategy.strands)]
             signature = (tuple(categories), tuple(strand.queries))
             if signature in seen:
@@ -123,11 +162,16 @@ class SourcePolicy:
             )
         return jobs
 
-    def category(self, url: str, suggested: Source, preferred: list[Source]) -> Source | None:
+    def category(
+        self, url: str, suggested: Source, preferred: list[Source], discovered: list[Source] | None = None
+    ) -> Source | None:
+        selected = set(normalize_sources(preferred))
+        allowed = selected & set(normalize_sources(discovered)) if discovered is not None else selected
         for category, policy in self.sources.items():
             if policy["domains"] and domain_matches(url, policy["domains"]):
-                return category if category in preferred else None
+                return category if category in allowed else None
         # Open-web categories are provisional: do not relabel a known platform as a studio.
-        if suggested in {"Studio portfolios", "Production companies"} and suggested in preferred:
-            return suggested
+        category = normalize_sources([suggested])[0]
+        if category == "Studios & Production Companies" and category in allowed and canonical_url(url):
+            return category
         return None

@@ -94,6 +94,13 @@ def discovery_api(monkeypatch):
             payload = json.loads(kwargs["input"])
             category = payload["source_categories"][0]
             domains = {
+                "Video & Film": "vimeo.com",
+                "Awards & Winning Work": "dandad.org",
+                "Creative Publications": "thedrum.com",
+                "Brand & Corporate Films": "nowadays.tv",
+                "Web & Interactive Design": "awwwards.com",
+                "Podcasts & Interviews": "gq.com",
+                "Social & Visual Inspiration": "pinterest.com",
                 "Vimeo": "vimeo.com",
                 "YouTube": "youtube.com",
                 "Instagram": "instagram.com",
@@ -152,6 +159,7 @@ def discovery_api(monkeypatch):
         def parse(self, **kwargs):
             if kwargs["text_format"] is StrategyDraft:
                 draft = StrategyDraft(
+                    source_priority=state.get("source_priority", []),
                     summary="Research warm environmental films",
                     assumptions=[],
                     strands=[
@@ -241,13 +249,13 @@ def test_live_search_records_sources_usage_and_exports(settings, discovery_api):
     with TestClient(create_app(live_settings(settings))) as client:
         assert not client.get("/health").json()["live_search_verified"]
         run = execute(client)
-        assert run["status"] == "completed"
+        assert run["status"] == "partial"  # Four searches cannot cover every selected category.
         assert len(run["results"]) == 3
         assert run["usage"]["web_search_calls"] == 4
         assert run["usage"]["requests_attempted"] == 5
         assert run["usage"]["input_tokens"] == 500
-        assert len(run["coverage"]) == 7
-        assert all(item["queries_attempted"] >= 1 for item in run["coverage"])
+        assert len(run["coverage"]) == 8
+        assert sum(item["queries_attempted"] >= 1 for item in run["coverage"]) == 4
         assert all(
             not item["is_mock"] and item["verification_status"] == "supported" for item in run["results"]
         )
@@ -347,7 +355,7 @@ def test_domain_preferences_and_budget_are_enforced(settings, discovery_api):
     assert run["usage"]["web_search_calls"] == 2
     for call in discovery_api["calls"]:
         if "tools" in call:
-            assert call["tools"][0]["filters"]["allowed_domains"] == ["youtube.com", "youtu.be"]
+            assert call["tools"][0]["filters"]["allowed_domains"] == ["youtube.com", "youtu.be", "vimeo.com"]
 
 
 def test_failed_group_keeps_other_source_results(settings, discovery_api):

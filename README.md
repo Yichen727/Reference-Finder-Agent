@@ -111,10 +111,13 @@ Research is stored locally in `data/reference_finder.sqlite3`, and exports in `d
 ```
 
 API documentation: **http://127.0.0.1:8000/docs** while the app is running.
-Source migration Phase 1 provides the eight-category registry in `config/sources.json`
-and twelve discovery leads in `config/curated_seeds.json`. `GET /source-categories`
-returns ordered category metadata. Current search and `GET /sources` still use the
-seven-category `config/legacy_sources.json` until the backend and frontend migration.
-Registry loading validates configuration without visiting the discovery URLs.
+Source migration Phases 1–2 provide the eight-category registry in `config/sources.json`
+and backend search support. `GET /source-categories` returns ordered category metadata.
+The current frontend and compatibility `GET /sources` endpoint retain the seven legacy
+labels until Phase 3; new submissions map them to the corresponding merged categories.
+Historical research keeps its original labels. Search priorities reuse the existing
+planning call, and result platforms still identify the actual publishing site.
+Curated Seeds are deferred: the registry and search never load or require
+`config/curated_seeds.json`. Its existing content is an unused draft.
 Project scope and roadmap: [PLAN.md](PLAN.md) (Chinese).
 PPTX templates, image permissions, and acceptance checks: [PPTX export guide](docs/PPTX_EXPORT.md).
