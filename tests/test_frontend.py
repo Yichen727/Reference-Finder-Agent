@@ -559,6 +559,8 @@ def test_details_are_read_only_and_open_without_any_api_calls(bridge):
     first = run["results"][0]
     assert not app.text_area
     assert not any(item.label == "New Search" for item in app.expander)
+    assert any(item.value == first["annotation"]["what_it_is"] for item in app.main.markdown)
+    assert not any("What to Borrow" in item.value or "What It Is" in item.value for item in app.main.markdown)
     calls = list(bridge["requests"])
     details(app, first)
     assert bridge["requests"] == calls
@@ -574,12 +576,38 @@ def test_details_are_read_only_and_open_without_any_api_calls(bridge):
     assert not app.text_area
 
 
-def test_borrow_summary_is_short_without_changing_the_annotation():
-    from frontend.layout import borrow_summary
+def test_description_summary_is_short_and_handles_missing_legacy_descriptions():
+    from frontend.layout import description_summary
 
-    original = "First creative principle. Second creative principle! Extra detail belongs in the dialog."
-    assert borrow_summary(original) == "First creative principle. Second creative principle!"
-    assert len(borrow_summary("An extended creative idea " * 50)) <= 280
+    original = (
+        "A short film about a coastal town. It follows the local fishing community. Extra source detail."
+    )
+    assert (
+        description_summary(original)
+        == "A short film about a coastal town. It follows the local fishing community."
+    )
+    assert len(description_summary("An extended source description " * 50)) <= 280
+    for missing in [None, "", " \n "]:
+        assert description_summary(missing) == "Description unavailable. Open the original link for details."
+
+
+def test_cached_layout_without_description_helper_recovers_without_losing_the_pack(bridge, monkeypatch):
+    from frontend import layout
+
+    app = launch(open_app())
+    run = app.session_state["run"]
+    pick(app, run, 0)
+    before = copy.deepcopy(app.session_state["pack_drafts"][run["id"]])
+    calls = list(bridge["requests"])
+    # Reproduce an existing process holding the module from before the UI update.
+    monkeypatch.delattr(layout, "description_summary")
+    app.run()
+    assert not app.exception
+    assert callable(layout.description_summary)
+    assert any(item.value == run["results"][0]["annotation"]["what_it_is"] for item in app.main.markdown)
+    assert selected(app, run, 0)
+    assert app.session_state["pack_drafts"][run["id"]] == before
+    assert bridge["requests"] == calls
 
 
 def test_sidebar_research_navigation_preserves_previous_drafts_and_retry_key(bridge, client):

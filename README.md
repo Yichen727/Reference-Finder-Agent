@@ -56,7 +56,8 @@ enter **Y**.
    The five-stage indicator follows brief analysis, source selection, search,
    verification/ranking, and result preparation. The bar counts completed stages;
    it does not estimate time remaining. Results replace it when ready.
-2. **Browse the cards.** Use **Details** for the AI analysis, source evidence, and
+2. **Browse the cards.** Each card shows a short description of the work. Use
+   **View Details** for **What to Borrow**, the full AI analysis, source evidence, and
    rights notes. Use **Link** to open the original work. The filter icon beside
    **Reference Results** filters by source or creative category.
 3. **Click + to add a reference** to **Your Pack**. Click the checkmark to remove it.

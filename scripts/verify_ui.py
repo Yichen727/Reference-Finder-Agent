@@ -357,6 +357,12 @@ def main():
             overflow:document.documentElement.scrollWidth>innerWidth};
         })()"""
         desktop = cdp.evaluate(geometry)
+        assert cdp.evaluate(f"""(() => {{
+          const card=document.querySelector('.st-key-reference_card_{run.results[0].id}');
+          return card.innerText.includes('Identifiable fixture analysis 0') &&
+            !card.innerText.includes('What It Is') && !card.innerText.includes('What to Borrow') &&
+            !card.innerText.includes('A specific creative principle.');
+        }})()"""), "Cards must show the existing work description without an annotation label"
         scroll_regions = """[...document.querySelectorAll('.st-key-reference_results *')]
           .filter(e=>e.clientWidth &&
             ((['auto','scroll'].includes(getComputedStyle(e).overflowX) && e.scrollWidth>e.clientWidth) ||
@@ -458,7 +464,7 @@ def main():
         cdp.evaluate(icon + ".click()")
         wait_until(lambda: cdp.pack_state()["ids"] == [item.id for item in run.results[:3]])
         calls = api_count()
-        cdp.click("Details")
+        cdp.click("View Details")
         wait_until(lambda: cdp.evaluate("!!document.querySelector('[role=dialog]')"))
         assert (
             cdp.evaluate("document.querySelector('[role=dialog]').querySelectorAll('textarea').length") == 0

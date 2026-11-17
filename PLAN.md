@@ -136,7 +136,7 @@ Web Search 支持来源信息和域名过滤，可用于受控的多来源查询
 - 默认仅显示易懂的搜索进度；技术诊断与 API 配置不进入主界面，通过后端 `/health`、研究 JSON 和 `/docs` 独立检查。侧栏不显示重复的 Live search 标签。
 - 保留三面板：左侧研究导航、中央 Reference Results、右侧 Your Pack；主工作区采用 70/30，为双列卡片和拖拽列表提供空间。右侧尽量固定在可见区域，较长参考包可独立滚动。
 - 视口宽度不超过 1100px 时改为上下堆叠，提供 View Your Pack 跳转入口。
-- 卡片只展示获准且可用的缩略图、标题、来源/创意类别、最多两句的 What to Borrow、原始链接、Add to Pack 和 View Details。
+- 卡片只展示获准且可用的缩略图、标题、来源/创意类别、最多两句的已有作品简介（复用 what_it_is，不展示字段标签）、原始链接、Add to Pack 和 View Details；旧记录缺少简介时显示中性提示，不生成额外内容。What to Borrow 保留在只读详情中。
 - 首页、活动/已保存研究及搜索进度页统一显示 Reference Finder 和固定英文副标题。卡片底栏按参考图加入淡分隔线，使用比例列：左侧加宽的描边 Details、居中的轻量 Link、最右侧 40×40 加号按钮，保持同一基线，并预留 Link 的最小宽度以避免截断；选中后显示高亮勾号，再次点击移出参考包，沿用原有选择回调、排序和注释。
 - 底栏使用明确的 CSS Grid 约束，Details 占据过半宽度，右侧图标与边缘对齐，统一可见文字行高；较窄的结果区域改为单列卡片，避免控制项挤压。样式移至 `frontend/workspace.css` 并在每次完整重运行时读取，解决已运行服务仍缓存旧等宽样式的问题。图标隐藏标签整体移出布局，并清除默认间距，修复加号左偏 4px 的问题；加号和勾号均已测量确认水平、垂直居中。
 - Reference Details 为只读报告，展示 What It Is、What to Borrow、Why It Fits Your Brief、Production Considerations，支持加入或移出参考包。证据、核验与使用权说明默认折叠。打开详情使用已加载的数据，不追加后端、缩略图或 OpenAI 请求。

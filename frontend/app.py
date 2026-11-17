@@ -1,13 +1,19 @@
+from importlib import reload
 from pathlib import Path
 from uuid import uuid4
 
 import streamlit as st
 
+from frontend import layout
 from frontend.api_client import APIClient, APIError
 from frontend.curation import EDIT_FIELDS, apply_pack_action, draft_from_run, selection_payload
-from frontend.layout import borrow_summary, preview_markup
 from frontend.pack_component import pack_list
 from frontend.search_progress import pipeline_stage, show_search_progress
+
+# A running Streamlit session may still hold layout from before this helper was added.
+# Reload only this stateless module; keep research and pack drafts in session state.
+if not hasattr(layout, "description_summary"):
+    reload(layout)
 
 SOURCES = [
     "Vimeo",
@@ -376,15 +382,16 @@ def presentation_for(run):
 def reference_card(run, item, draft, previews):
     run_id, item_id = run["id"], item["id"]
     with st.container(border=True, key=f"reference_card_{item_id}"):
-        st.html(preview_markup(previews.get(item_id), item["title"]))
+        st.html(layout.preview_markup(previews.get(item_id), item["title"]))
         st.markdown(f"#### {item['title']}")
         st.caption(f"{item['platform']} / {item['strand']}")
         annotation = draft["annotations"][item_id]
-        st.markdown("**What to Borrow:** " + borrow_summary(annotation["what_to_borrow"]))
+        description = annotation.get("what_it_is") or (item.get("annotation") or {}).get("what_it_is")
+        st.markdown(layout.description_summary(description))
         with st.container(key=f"card_actions_{item_id}"):
             details, link, selection = st.columns([6, 3, 1.2], gap="xsmall", wrap=False)
             details.button(
-                "Details",
+                "View Details",
                 key=f"details_{item_id}",
                 width="stretch",
                 wrap=False,
@@ -423,7 +430,7 @@ def reference_details(run, item):
     st.subheader(item["title"])
     st.caption(f"{item['platform']} / {item['strand']}")
     st.caption(f"Creator: {item.get('creator') or 'Not listed'}")
-    st.html(preview_markup(preview, item["title"]))
+    st.html(layout.preview_markup(preview, item["title"]))
     original, selection = st.columns(2)
     original.link_button("Open Link", item["source_url"], width="stretch")
     selected = item_id in draft_for(run)["ordered_ids"]

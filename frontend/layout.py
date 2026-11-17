@@ -4,9 +4,11 @@ import re
 from html import escape
 
 
-def borrow_summary(value: str) -> str:
-    """Keep card copy to at most two sentences without changing stored annotations."""
-    text = " ".join(value.split())
+def description_summary(value: str | None) -> str:
+    """Shorten an existing source description; never infer missing work details."""
+    text = " ".join((value or "").split())
+    if not text:
+        return "Description unavailable. Open the original link for details."
     sentences = re.split(r"(?<=[.!?])\s+", text)
     summary = " ".join(sentences[:2])
     if len(summary) > 280:
