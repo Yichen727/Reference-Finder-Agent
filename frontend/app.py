@@ -561,8 +561,6 @@ def result_panel():
         return
     draft = draft_for(run)
     presentation = presentation_for(run)
-    if run["status"] == "partial":
-        st.info(f"Found {len(run['results'])} references. Some sources need review or had limited coverage.")
     st.html('<a class="rf-pack-shortcut" href="#your-pack">View Your Pack</a>')
     with st.container(key="research_workspace"):
         results, pack = st.columns([7, 3], gap="medium")
@@ -642,7 +640,7 @@ def result_panel():
 def main():
     stylesheet = Path(__file__).with_name("workspace.css").read_text(encoding="utf-8")
     st.html(f"<style>{stylesheet}</style>")
-    st.title("Reference Finder")
+    st.title("Atomized Reference Finder")
     st.write("Turn your creative idea into a curated reference pack.")
     try:
         if "workspace_health" not in st.session_state:
