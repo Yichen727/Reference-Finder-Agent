@@ -18,6 +18,7 @@ from backend.schemas.models import (
     now,
 )
 from backend.services.docx_export import render_docx
+from backend.services.pptx_export import render_pptx
 
 
 class Workflow:
@@ -145,7 +146,9 @@ class Workflow:
             self.repository.put("run", run)
             return selection
 
-    def export(self, run_id: str, expected_version: int | None = None) -> ExportRecord:
+    def export(
+        self, run_id: str, expected_version: int | None = None, *, file_format="docx", previews=None
+    ) -> ExportRecord:
         run = self.run(run_id)
         if run.mode != "live":
             raise AppError("archived_run", "Archived demonstration runs cannot be exported.", 409)
@@ -155,14 +158,32 @@ class Workflow:
             raise AppError(
                 "selection_conflict", "The saved pack changed before export. Reload and try again.", 409
             )
-        record = ExportRecord(run_id=run.id, selection_version=run.selection.version, filename="")
-        record.filename = f"{record.id}.docx"
+        if file_format not in {"docx", "pptx"}:
+            raise AppError("export_format", "This export format is unsupported.", 422)
+        record = ExportRecord(
+            run_id=run.id, selection_version=run.selection.version, filename="", format=file_format
+        )
+        record.filename = f"{record.id}.{file_format}"
         folder = self.settings.data_dir / "exports"
         folder.mkdir(parents=True, exist_ok=True)
+        destination = folder / record.filename
+        temporary = folder / f".{record.id}.tmp"
         try:
-            render_docx(folder / record.filename, self.brief(run.brief_id), run)
+            if file_format == "pptx":
+                metadata = render_pptx(temporary, self.brief(run.brief_id), run, previews)
+                record.template_version = metadata["template_version"]
+                record.template_hashes = metadata["template_hashes"]
+            else:
+                render_docx(temporary, self.brief(run.brief_id), run)
+            temporary.replace(destination)
             self.repository.put("export", record)
+        except AppError:
+            temporary.unlink(missing_ok=True)
+            destination.unlink(missing_ok=True)
+            raise
         except Exception:
+            temporary.unlink(missing_ok=True)
+            destination.unlink(missing_ok=True)
             raise AppError(
                 "export_failed", "Could not generate the document. Check disk space and retry.", 500
             ) from None

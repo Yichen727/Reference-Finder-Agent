@@ -30,7 +30,7 @@ def main():
             audience="A broad adult audience; curiosity and constructive action",
             format="Short film",
             qualities="Human storytelling, unexpected humour, clear visual ideas",
-            requested_count=3,
+            requested_count=4,
         )
     )
     print(
@@ -69,9 +69,9 @@ def main():
     workflow.save_selection(
         run.id, SelectionInput(ordered_ids=[item.id for item in run.results], expected_version=0)
     )
-    record = workflow.export(run.id)
+    record = workflow.export(run.id, file_format="pptx")
     print(f"Evidence and usage: {settings.data_dir / 'result.json'}", flush=True)
-    print(f"DOCX: {settings.data_dir / 'exports' / record.filename}", flush=True)
+    print(f"PPTX: {settings.data_dir / 'exports' / record.filename}", flush=True)
     return 0
 
 

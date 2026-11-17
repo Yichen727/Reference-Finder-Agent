@@ -142,12 +142,36 @@ class ThumbnailService:
         self.settings, self.store, self.fetcher_factory = settings, store, fetcher_factory
         self.lock = threading.Lock()
 
+    def cache_key(self, item):
+        source = str(item.source_url)
+        approved = item.thumbnail.model_dump(mode="json") if item.thumbnail else None
+        return hashlib.sha256(
+            json.dumps([source, approved, self.settings.preview_approved_domains]).encode()
+        ).hexdigest()
+
+    def for_export(self, run) -> dict:
+        """Reuse cached bytes only with reproduction permission; never fetch during export."""
+        selected = set(run.selection.ordered_ids) if run.selection else set()
+        previews = {}
+        for item in run.results:
+            if item.id not in selected:
+                continue
+            cached = self.store.preview(self.cache_key(item))
+            if not cached or not cached.get("image"):
+                continue
+            licensed = re.fullmatch(
+                r"Image license: https://creativecommons\.org/(?:licenses/(?:by|by-sa)/(?:[1-4]\.0|2\.5)|publicdomain/zero/1\.0)/?",
+                cached.get("basis", ""),
+            )
+            approved = domain_matches(str(item.source_url), self.settings.pptx_image_approved_domains)
+            if licensed or approved:
+                previews[item.id] = cached
+        return previews
+
     def resolve(self, item, *, deadline=None) -> dict:
         source = str(item.source_url)
         approved = item.thumbnail.model_dump(mode="json") if item.thumbnail else None
-        key = hashlib.sha256(
-            json.dumps([source, approved, self.settings.preview_approved_domains]).encode()
-        ).hexdigest()
+        key = self.cache_key(item)
         cached = self.store.preview(key)
         if cached is not None:
             return cached

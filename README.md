@@ -1,7 +1,7 @@
 # Atomized Reference Finder
 
 Turn your creative idea into a curated reference pack. Search external sources,
-browse visual references, and export your selection as a Word document.
+browse visual references, and export an editable PowerPoint pack using the supplied Atomized templates.
 
 **Already set up? Start at Step 3.**
 
@@ -63,8 +63,18 @@ enter **Y**.
 3. **Click + to add a reference** to **Your Pack**. Click the checkmark to remove it.
    Filtering does not remove selected references from your pack.
 4. **Drag items in Your Pack** into your preferred order. Use **x** to remove an item.
-5. **Click Export Reference Pack**, then **Download Reference Pack (.docx)**.
-   Export saves your selection and order. Use the Word document to create your PPTX manually.
+5. **Click Export Reference Pack**, then **Download Reference Pack (.pptx)**.
+   Export saves your selection and order. Each reference fills one template slide with
+   its source, uppercase single-line title (54pt by default, reduced to fit),
+   **WHAT IT IS**, **WHAT TO BORROW**, and **WHY IT FITS BRIEF**,
+   plus a bold, underlined **ORIGINAL LINK HERE.** link.
+   Your reference slides appear after the Base template's first two pages, before its
+   original closing page. Four selected references produce seven slides.
+
+Continue editing the downloaded file in PowerPoint. Source evidence, verification,
+production considerations, and rights notes are included in speaker notes. Images
+need permission for deck reproduction; a preview visible in the app may use a placeholder
+in the exported pack. Exporting does not make additional OpenAI calls.
 
 The default search requests 10 references; you can request up to 20. Some searches
 return fewer usable results. Sources include Vimeo, YouTube, Instagram, Pinterest,
@@ -86,6 +96,9 @@ Research is stored locally in `data/reference_finder.sqlite3`, and exports in `d
 | No usable references are found | Try a clearer prompt, broader sources, or fewer creative constraints. |
 | A thumbnail is missing | The preview is unavailable or restricted. Use **Link** to view the original. |
 | Export reports a saved-pack conflict | **Load Saved Pack** replaces your current draft with the saved version. Review it before exporting again. |
+| Export asks for a workspace restart | Your pack has been saved. Stop the old launcher, restart it, reopen the research, and export again. |
+| A reference's text exceeds one slide | Remove the named reference and retry. Its full analysis remains in the saved research. |
+| A PowerPoint template is missing or invalid | Restore the files and manifest in `backend/templates/`, then retry. |
 
 ## Developer checks (optional)
 
@@ -98,3 +111,4 @@ Research is stored locally in `data/reference_finder.sqlite3`, and exports in `d
 
 API documentation: **http://127.0.0.1:8000/docs** while the app is running.
 Project scope and roadmap: [PLAN.md](PLAN.md) (Chinese).
+PPTX templates, image permissions, and acceptance checks: [PPTX export guide](docs/PPTX_EXPORT.md).

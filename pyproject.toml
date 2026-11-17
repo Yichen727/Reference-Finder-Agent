@@ -16,6 +16,7 @@ dependencies = [
   "openai>=1.68,<3",
   "python-docx>=1.1,<2",
   "pillow>=11,<14",
+  "lxml>=6,<7",
 ]
 
 [project.optional-dependencies]
@@ -26,6 +27,7 @@ include = ["backend*", "frontend*"]
 
 [tool.setuptools.package-data]
 frontend = ["workspace.css", "pack_assets/*.js", "pack_assets/*.css"]
+backend = ["templates/*.pptx", "templates/*.json"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

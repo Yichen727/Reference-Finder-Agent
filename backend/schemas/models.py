@@ -282,6 +282,9 @@ class ExportRecord(Model):
     run_id: str
     selection_version: int
     filename: str
+    format: Literal["docx", "pptx"] = "docx"
+    template_version: str | None = None
+    template_hashes: dict[str, str] = Field(default_factory=dict, max_length=2)
     created_at: datetime = Field(default_factory=now)
 
 

@@ -13,7 +13,6 @@ from urllib.request import ProxyHandler, build_opener
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from docx import Document  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 from PIL import Image, ImageDraw  # noqa: E402
 from websockets.sync.client import connect  # noqa: E402
@@ -24,6 +23,7 @@ from backend.repositories.sqlite import Repository  # noqa: E402
 from backend.schemas.models import ApprovedThumbnail  # noqa: E402
 from tests.conftest import completed_run  # noqa: E402
 from tests.fixtures import FixtureProvider  # noqa: E402
+from tests.pptx_helpers import slide_text, slides_from_bytes  # noqa: E402
 
 ARTIFACTS = ROOT / "data" / "ui-review" / str(int(time.time()))
 OPENER = build_opener(ProxyHandler({}))
@@ -213,11 +213,19 @@ def seed(config):
 
 def main():
     ARTIFACTS.mkdir(parents=True)
-    config = Settings(_env_file=None, data_dir=ARTIFACTS / "database", openai_api_key="test-only-key")
+    config = Settings(
+        _env_file=None,
+        data_dir=ARTIFACTS / "database",
+        openai_api_key="test-only-key",
+        pptx_image_approved_domains=["studio.test"],
+    )
     run = seed(config)
     environment = os.environ.copy()
     environment.update(
-        DATA_DIR=str(config.data_dir), OPENAI_API_KEY="test-only-key", BACKEND_URL="http://127.0.0.1:8100"
+        DATA_DIR=str(config.data_dir),
+        OPENAI_API_KEY="test-only-key",
+        BACKEND_URL="http://127.0.0.1:8100",
+        PPTX_IMAGE_APPROVED_DOMAINS='["studio.test"]',
     )
     processes, logs = [], []
 
@@ -522,7 +530,7 @@ def main():
         displayed = cdp.evaluate(f"[...({PACK_ROOT}).querySelectorAll('.pack-row')].map(e=>e.dataset.id)")
         cdp.click("Export Reference Pack")
         wait_until(
-            lambda: cdp.evaluate("document.body.innerText.includes('Download Reference Pack (.docx)')")
+            lambda: cdp.evaluate("document.body.innerText.includes('Download Reference Pack (.pptx)')")
         )
         saved = read_json(f"http://127.0.0.1:8100/search-runs/{run.id}")["selection"]
         assert saved["ordered_ids"] == displayed, (saved, displayed)
@@ -532,14 +540,15 @@ def main():
                     "SELECT payload FROM records WHERE kind='export' ORDER BY rowid DESC LIMIT 1"
                 ).fetchone()["payload"]
             )
-        document = Document(config.data_dir / "exports" / export["filename"])
-        text = "\n".join(paragraph.text for paragraph in document.paragraphs)
+        slides = slides_from_bytes((config.data_dir / "exports" / export["filename"]).read_bytes())
+        assert len(slides) == len(displayed) + 3
+        text = "\n".join(slide_text(slide) for slide in slides[2:-1])
         assert text.index("Identifiable fixture analysis 1") < text.index("Identifiable fixture analysis 0")
         print(
             "Continuous handle/title dragging, outside release, cancellation, touch and keyboard passed",
             flush=True,
         )
-        print("Duplicate titles, row removal and exact DOCX export order passed", flush=True)
+        print("Duplicate titles, row removal and exact PPTX slide order passed", flush=True)
         samples = {}
         for width in [1200, 1101, 1024, 768, 390]:
             cdp.call(

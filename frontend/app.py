@@ -150,7 +150,15 @@ def new_research():
 
 def display_error(error: APIError):
     st.session_state["last_error"] = str(error)
-    if error.code == "selection_conflict":
+    if error.code in {
+        "export_template_missing",
+        "export_template_invalid",
+        "export_text_overflow",
+        "export_text_invalid",
+        "pptx_backend_unavailable",
+    }:
+        st.error(str(error).split(" (")[0])
+    elif error.code == "selection_conflict":
         st.session_state["conflict_run"] = st.session_state.get("run_id")
         st.error("This saved pack changed in another session. Load the saved version before exporting.")
     elif error.code in {"openai_not_configured", "openai_authentication", "openai_permission"}:
@@ -500,9 +508,20 @@ def export_pack(run: dict, draft: dict):
     # Advance the local version even if document generation or download subsequently fails.
     draft["expected_version"] = saved["version"]
     run["selection"] = saved
-    record = client.request(
-        "POST", f"/search-runs/{run['id']}/exports/docx", {"expected_selection_version": saved["version"]}
-    )
+    try:
+        record = client.request(
+            "POST", f"/search-runs/{run['id']}/exports/pptx", {"expected_selection_version": saved["version"]}
+        )
+    except APIError as error:
+        if error.status in {404, 405} and error.code == "http_error":
+            raise APIError(
+                "Your pack has been saved. Restart the workspace to load the PowerPoint exporter, "
+                "then retry.",
+                code="pptx_backend_unavailable",
+            ) from None
+        raise
+    if record.get("format") != "pptx":
+        raise APIError("The server did not return a PowerPoint export. Restart the workspace and retry.")
     if record["selection_version"] != saved["version"]:
         raise APIError("The saved pack changed before export.", code="selection_conflict", status=409)
     content = client.request("GET", f"/exports/{record['id']}/download", binary=True)
@@ -510,6 +529,7 @@ def export_pack(run: dict, draft: dict):
         "content": content,
         "version": saved["version"],
         "revision": draft["revision"],
+        "format": "pptx",
     }
 
 
@@ -534,6 +554,8 @@ def selection_panel(run, draft):
             activate_run(run["id"], reload_saved=True)
             st.rerun()
     download = st.session_state.setdefault("pack_downloads", {}).get(run["id"])
+    if download and download.get("format") != "pptx":
+        download = None
     if st.button(
         "Export Reference Pack",
         type="secondary" if download else "primary",
@@ -545,11 +567,11 @@ def selection_panel(run, draft):
         st.rerun()
     if download and download["revision"] == draft["revision"]:
         st.download_button(
-            "Download Reference Pack (.docx)",
+            "Download Reference Pack (.pptx)",
             download["content"],
             type="primary",
-            file_name=f"Atomized-Reference-Pack-{run['id'][:8]}.docx",
-            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            file_name=f"Atomized-Reference-Pack-{run['id'][:8]}.pptx",
+            mime="application/vnd.openxmlformats-officedocument.presentationml.presentation",
             width="stretch",
         )
 

@@ -23,6 +23,7 @@ from backend.schemas.models import (
     SelectionInput,
     StoredBrief,
 )
+from backend.services.pptx_export import PPTX_MIME
 from backend.services.presentation import PresentationStore
 from backend.services.source_policy import SourcePolicy
 from backend.services.thumbnails import ThumbnailService
@@ -199,6 +200,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     def export_docx(run_id: UUID, value: ExportRequest | None = None):
         return workflow.export(str(run_id), value.expected_selection_version if value else None)
 
+    @app.post("/search-runs/{run_id}/exports/pptx", response_model=ExportRecord, status_code=201)
+    def export_pptx(run_id: UUID, value: ExportRequest | None = None):
+        run = workflow.run(str(run_id))
+        return workflow.export(
+            str(run_id),
+            value.expected_selection_version if value else None,
+            file_format="pptx",
+            previews=thumbnails.for_export(run),
+        )
+
     @app.get("/exports/{export_id}/download")
     def download_export(export_id: UUID):
         record = ExportRecord.model_validate(repo.get("export", str(export_id)))
@@ -208,8 +219,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             raise AppError("export_missing", "Export file is missing; generate it again.", 404)
         return FileResponse(
             path,
-            media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-            filename=f"Atomized-Reference-Pack-{record.id[:8]}.docx",
+            media_type=PPTX_MIME
+            if record.format == "pptx"
+            else "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            filename=f"Atomized-Reference-Pack-{record.id[:8]}.{record.format}",
         )
 
     return app

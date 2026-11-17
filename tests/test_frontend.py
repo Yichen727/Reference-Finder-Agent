@@ -1,13 +1,12 @@
 import copy
-from io import BytesIO
 from pathlib import Path
 
 import pytest
-from docx import Document
 from streamlit.testing.v1 import AppTest
 
 from backend.schemas.models import ApprovedThumbnail, SearchRun
 from frontend.api_client import APIClient, APIError
+from tests.pptx_helpers import slide_text, slides_from_bytes
 
 APP = Path(__file__).resolve().parents[1] / "frontend" / "app.py"
 
@@ -38,13 +37,13 @@ def bridge(client, monkeypatch):
             method == "PATCH" and state.get("fail_rename")
         ):
             raise APIError("Research management is unavailable.", status=503)
-        if method == "POST" and path.endswith("/exports/docx"):
+        if method == "POST" and path.endswith("/exports/pptx"):
             if state["fail_export"]:
                 state["fail_export"] = False
                 raise APIError("Document generation failed.", code="export_failed", status=500)
             if state["race_export"]:
                 state["race_export"] = False
-                run_url = path.removesuffix("/exports/docx")
+                run_url = path.removesuffix("/exports/pptx")
                 selection = client.get(run_url).json()["selection"]
                 client.put(
                     run_url + "/selection",
@@ -156,13 +155,13 @@ def test_export_automatically_saves_latest_order_and_annotations(bridge, client)
     assert saved["ordered_ids"] == [second["id"], first["id"]]
     assert saved["annotation_overrides"][first["id"]]["what_to_borrow"] == "My revised creative principle"
     download = app.session_state["pack_downloads"][run["id"]]
-    text = "\n".join(paragraph.text for paragraph in Document(BytesIO(download["content"])).paragraphs)
+    text = "\n".join(slide_text(slide) for slide in slides_from_bytes(download["content"])[2:-1])
     assert "My revised creative principle" in text
-    assert text.index(second["title"]) < text.index(first["title"])
+    assert text.index(second["title"].upper()) < text.index(first["title"].upper())
     export = next(
         payload
         for method, path, payload in bridge["requests"]
-        if method == "POST" and path.endswith("/exports/docx")
+        if method == "POST" and path.endswith("/exports/pptx")
     )
     assert export["expected_selection_version"] == saved["version"]
     assert len(app.get("download_button")) == 1
@@ -378,6 +377,43 @@ def test_export_failure_after_save_keeps_the_new_version_for_retry(bridge, clien
     button(app, "Export Reference Pack").click().run()
     assert not app.exception
     assert app.session_state["pack_downloads"][run["id"]]["version"] == 2
+
+
+def test_legacy_download_cache_is_not_mislabelled_as_powerpoint(bridge):
+    app = launch(open_app())
+    run = app.session_state["run"]
+    pick(app, run, 0)
+    draft = app.session_state["pack_drafts"][run["id"]]
+    app.session_state["pack_downloads"][run["id"]] = {
+        "content": b"old-docx",
+        "revision": draft["revision"],
+        "version": 1,
+    }
+    app.run()
+    assert not app.get("download_button")
+    button(app, "Export Reference Pack").click().run()
+    assert not app.exception
+    assert app.session_state["pack_downloads"][run["id"]]["format"] == "pptx"
+
+
+def test_old_backend_export_message_keeps_the_saved_pack(bridge, client, monkeypatch):
+    original = APIClient.request
+
+    def request(self, method, path, *args, **kwargs):
+        if method == "POST" and path.endswith("/exports/pptx"):
+            raise APIError("Not found", code="http_error", status=404)
+        return original(self, method, path, *args, **kwargs)
+
+    monkeypatch.setattr(APIClient, "request", request)
+    app = launch(open_app())
+    run = app.session_state["run"]
+    pick(app, run, 0)
+    button(app, "Export Reference Pack").click().run()
+    assert app.error and "Restart the workspace" in app.error[0].value
+    assert client.get(f"/search-runs/{run['id']}").json()["selection"]["ordered_ids"] == [
+        run["results"][0]["id"]
+    ]
+    assert selected(app, run, 0)
 
 
 @pytest.mark.parametrize("late_conflict", [False, True])
