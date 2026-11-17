@@ -79,6 +79,18 @@ class CDP:
         result = self.call("Page.captureScreenshot", format="png", captureBeyondViewport=False)
         (ARTIFACTS / name).write_bytes(base64.b64decode(result["data"]))
 
+    def choose_multiselect(self, key, value):
+        field = f"document.querySelector('.st-key-{key} input')"
+        wait_until(lambda: self.evaluate(f"!!({field})"))
+        self.evaluate(field + ".focus()")
+        self.call("Input.insertText", text=value)
+        option = (
+            "[...document.querySelectorAll('[role=option]')]"
+            f".find(e=>e.innerText.trim()==={json.dumps(value)})"
+        )
+        wait_until(lambda: self.evaluate(f"!!({option})"))
+        self.evaluate(option + ".click()")
+
     def pack_state(self):
         return self.evaluate(f"""(() => {{
           const list=({PACK_ROOT})?.querySelector('.pack-list');
@@ -163,6 +175,8 @@ def seed(config):
             workflow.repository.put("brief", brief)
             runs.append(workflow.run(record["id"]))
         run = runs[0]
+        run.results[0].platform = "YouTube"
+        run.results[0].strand = "Craft"
         for index, item in enumerate(run.results[:3]):
             item.title = "Shared Futures Film" if index < 2 else "A Different Perspective"
             item.annotation.what_it_is = f"Identifiable fixture analysis {index}"
@@ -337,6 +351,38 @@ def main():
         assert abs(actions[2]["x"] + actions[2]["w"] - footer) < 2, actions
         assert max(action["h"] for action in actions) - min(action["h"] for action in actions) < 2, actions
         cdp.screenshot("desktop.png")
+        filter_button = f"document.querySelector('.st-key-result_filters_{run.id} button')"
+        assert cdp.evaluate(f"""(() => {{
+          const heading=document.querySelector('.st-key-results_heading_{run.id}');
+          const title=heading.querySelector('h3').getBoundingClientRect();
+          const icon=({filter_button}).getBoundingClientRect();
+          return icon.x>title.x && icon.right<=heading.getBoundingClientRect().right+1;
+        }})()""")
+        before_filters = cdp.pack_state()
+        calls_before_filters = api_count()
+        cdp.evaluate(filter_button + ".click()")
+        cdp.choose_multiselect(f"source_filter_{run.id}", "Vimeo")
+        wait_until(
+            lambda: cdp.evaluate("document.querySelectorAll('[class*=st-key-card_select_]').length===11")
+        )
+        assert cdp.pack_state() == before_filters
+        assert cdp.evaluate(filter_button + ".innerText.includes('1')")
+        cdp.choose_multiselect(f"strand_filter_{run.id}", "Craft")
+        wait_until(
+            lambda: cdp.evaluate("document.querySelectorAll('[class*=st-key-card_select_]').length===0")
+        )
+        assert cdp.pack_state() == before_filters
+        assert cdp.evaluate(filter_button + ".innerText.includes('2')")
+        cdp.screenshot("filter-popover.png")
+        cdp.click("Clear Filters")
+        wait_until(
+            lambda: cdp.evaluate("document.querySelectorAll('[class*=st-key-card_select_]').length===12")
+        )
+        assert cdp.pack_state() == before_filters
+        assert api_count() == calls_before_filters
+        assert not cdp.evaluate(filter_button + ".innerText.includes('2')")
+        cdp.evaluate(filter_button + ".click()")
+        print("Filter icon, active count, immediate updates and Clear Filters preserve the pack", flush=True)
         # The icon toggles selection through the existing callback, without duplicates.
         icon = f"document.querySelector('.st-key-card_select_{run.results[3].id} button')"
         cdp.evaluate(icon + ".click()")
@@ -447,6 +493,11 @@ def main():
             assert actions[0]["w"] > footer_width * 0.52, (width, actions)
             assert cdp.evaluate(label_alignment), f"Text baselines differ at {width}px"
             assert cdp.evaluate(icon_alignment), f"Add/check icons are off-centre at {width}px"
+            assert cdp.evaluate(f"""(() => {{
+              const row=document.querySelector('.st-key-results_heading_{run.id}').getBoundingClientRect();
+              const icon=({filter_button}).getBoundingClientRect();
+              return icon.right<=row.right+1 && icon.width<100;
+            }})()"""), f"Filter trigger overflows at {width}px"
             assert cdp.evaluate(f"""(() => {{
               const label=document.querySelector('.st-key-card_actions_{run.results[0].id} a p');
               return !!label && label.scrollWidth <= label.clientWidth + 1;

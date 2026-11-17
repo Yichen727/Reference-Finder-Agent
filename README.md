@@ -51,8 +51,10 @@ The footer uses an explicit CSS grid so Details takes the majority of the availa
 Narrow results columns stack cards to preserve readable controls. Add/check icons are
 centred independently of their hidden accessible labels. Workspace CSS is read from
 `frontend/workspace.css` on each full rerun, avoiding stale styles cached in Python imports.
-The collapsed **Filter Results** section filters sources and creative
-categories. **Exclude Reference** in the dialog removes a candidate from browsing and the pack;
+The sliders icon beside **Reference Results** opens source and creative category
+filters in a compact popover. Its count shows the total selected filter values; cards
+update immediately. **Clear Filters** resets both controls without changing Your Pack,
+exclusions or prepared exports. **Exclude Reference** in the dialog removes a candidate from browsing and the pack;
 **Restore Excluded References** brings it back. Filters never deselect hidden references
 or discard annotation edits. Export saves explicit exclusions with the selection.
 Cards always reserve a 16:9 preview area, preserving the full image with letterboxing.

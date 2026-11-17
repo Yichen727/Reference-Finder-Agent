@@ -84,6 +84,11 @@ def restore_excluded(run_id: str):
     changed(run_id)
 
 
+def clear_filters(run_id: str):
+    st.session_state[f"source_filter_{run_id}"] = []
+    st.session_state[f"strand_filter_{run_id}"] = []
+
+
 def close_detail():
     st.session_state.pop("active_detail", None)
 
@@ -558,31 +563,60 @@ def result_panel():
     presentation = presentation_for(run)
     if run["status"] == "partial":
         st.info(f"Found {len(run['results'])} references. Some sources need review or had limited coverage.")
-    with st.expander("Filter Results", expanded=False):
-        platforms = sorted({item["platform"] for item in run["results"]})
-        strands = sorted({item["strand"] for item in run["results"]})
-        source_filter = st.multiselect("Source", platforms, key=f"source_filter_{run['id']}")
-        strand_filter = st.multiselect("Creative Category", strands, key=f"strand_filter_{run['id']}")
-        if draft.get("rejected_ids"):
-            st.caption(f"{len(draft['rejected_ids'])} references excluded.")
-            st.button("Restore Excluded References", on_click=restore_excluded, args=(run["id"],))
-    visible = [
-        item
-        for item in run["results"]
-        if item["id"] not in draft.get("rejected_ids", [])
-        and (not source_filter or item["platform"] in source_filter)
-        and (not strand_filter or item["strand"] in strand_filter)
-    ]
-    if not visible:
-        st.info("No references match these filters. Adjust the filters or restore excluded references.")
     st.html('<a class="rf-pack-shortcut" href="#your-pack">View Your Pack</a>')
     with st.container(key="research_workspace"):
         results, pack = st.columns([7, 3], gap="medium")
         with results:
-            heading, count = st.columns([3, 1])
-            heading.subheader("Reference Results")
-            count.caption(f"{len(visible)} Results")
-            st.caption(st.session_state["brief"]["concept"])
+            active_filters = len(st.session_state.get(f"source_filter_{run['id']}", [])) + len(
+                st.session_state.get(f"strand_filter_{run['id']}", [])
+            )
+            with st.container(
+                key=f"results_heading_{run['id']}",
+                horizontal=True,
+                wrap=False,
+                gap="small",
+                vertical_alignment="center",
+            ):
+                st.subheader("Reference Results")
+                with st.popover(
+                    str(active_filters) if active_filters else "",
+                    icon=":material/tune:",
+                    type="tertiary",
+                    key=f"result_filters_{run['id']}",
+                    help=f"Filter references ({active_filters} selected values)"
+                    if active_filters
+                    else "Filter references",
+                ):
+                    platforms = sorted({item["platform"] for item in run["results"]})
+                    strands = sorted({item["strand"] for item in run["results"]})
+                    source_filter = st.multiselect("Source", platforms, key=f"source_filter_{run['id']}")
+                    strand_filter = st.multiselect(
+                        "Creative Category", strands, key=f"strand_filter_{run['id']}"
+                    )
+                    st.button(
+                        "Clear Filters",
+                        key=f"clear_filters_{run['id']}",
+                        disabled=not active_filters,
+                        on_click=clear_filters,
+                        args=(run["id"],),
+                        width="stretch",
+                    )
+                    if draft.get("rejected_ids"):
+                        st.divider()
+                        st.caption(f"{len(draft['rejected_ids'])} references excluded.")
+                        st.button("Restore Excluded References", on_click=restore_excluded, args=(run["id"],))
+            visible = [
+                item
+                for item in run["results"]
+                if item["id"] not in draft.get("rejected_ids", [])
+                and (not source_filter or item["platform"] in source_filter)
+                and (not strand_filter or item["strand"] in strand_filter)
+            ]
+            st.caption(f"{len(visible)} Results · {st.session_state['brief']['concept']}")
+            if not visible:
+                st.info(
+                    "No references match these filters. Adjust the filters or restore excluded references."
+                )
             for start in range(0, len(visible), 2):
                 with st.container(key=f"reference_grid_{start}"):
                     columns = st.columns(2, gap="small")

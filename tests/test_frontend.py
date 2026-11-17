@@ -127,7 +127,7 @@ def test_home_is_simple_and_defaults_launch_with_one_click(bridge, client):
     button(app, "Find References").click().run()
     assert not app.exception
     run = app.session_state["run"]
-    assert len(run["results"]) == 12
+    assert len(run["results"]) == 10
     assert run["strategy"]["strands"]
     assert run["mode"] == "live"
     assert sum(method == "POST" and path.endswith("/strategy") for method, path, _ in bridge["requests"]) == 1
@@ -297,6 +297,47 @@ def test_filters_preserve_hidden_selections_and_annotation_edits(bridge, client)
     widget(restored.multiselect, f"strand_filter_{run.id}").set_value(["Execution"]).run()
     assert card_count(restored) == 1
     assert first["id"] in restored.session_state["pack_drafts"][run.id]["ordered_ids"]
+
+
+def test_filter_popover_count_and_clear_preserve_pack_exports_and_exclusions(bridge, client):
+    app = launch(open_app())
+    run = SearchRun.model_validate(app.session_state["run"])
+    run.results[1].platform = "YouTube"
+    run.results[1].strand = "Execution"
+    client.app.state.workflow.repository.put("run", run)
+    app = AppTest.from_file(str(APP), default_timeout=15)
+    app.query_params["run"] = run.id
+    app.run()
+    record = app.session_state["run"]
+    assert not any(item.label == "Filter Results" for item in app.expander)
+    popover = widget(app.get("popover"), f"result_filters_{run.id}")
+    assert [item.label for item in popover.multiselect] == ["Source", "Creative Category"]
+    assert popover.proto.popover.label == ""
+    assert "tune" in popover.proto.popover.icon
+    assert widget(app.button, f"clear_filters_{run.id}").disabled
+    pick(app, record, 0)
+    details(app, record["results"][2])
+    widget(app.button, f"exclude_{record['results'][2]['id']}").click().run()
+    button(app, "Export Reference Pack").click().run()
+    before = copy.deepcopy(app.session_state["pack_drafts"][run.id])
+    download = copy.deepcopy(app.session_state["pack_downloads"][run.id])
+    widget(app.multiselect, f"source_filter_{run.id}").set_value(["YouTube"]).run()
+    assert card_count(app) == 1
+    assert widget(app.get("popover"), f"result_filters_{run.id}").proto.popover.label == "1"
+    widget(app.multiselect, f"strand_filter_{run.id}").set_value(["Story"]).run()
+    assert card_count(app) == 0
+    assert widget(app.get("popover"), f"result_filters_{run.id}").proto.popover.label == "2"
+    assert app.session_state["pack_drafts"][run.id] == before
+    widget(app.button, f"clear_filters_{run.id}").click().run()
+    assert not app.exception
+    assert card_count(app) == 2
+    assert selected(app, record, 0)
+    assert app.session_state[f"source_filter_{run.id}"] == []
+    assert app.session_state[f"strand_filter_{run.id}"] == []
+    assert widget(app.get("popover"), f"result_filters_{run.id}").proto.popover.label == ""
+    assert widget(app.button, f"clear_filters_{run.id}").disabled
+    assert app.session_state["pack_drafts"][run.id] == before
+    assert app.session_state["pack_downloads"][run.id] == download
 
 
 def test_exclusions_are_saved_with_the_pack_and_can_be_restored(bridge, client):
