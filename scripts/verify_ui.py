@@ -217,7 +217,6 @@ def main():
         _env_file=None,
         data_dir=ARTIFACTS / "database",
         openai_api_key="test-only-key",
-        pptx_image_approved_domains=["studio.test"],
     )
     run = seed(config)
     environment = os.environ.copy()
@@ -225,7 +224,6 @@ def main():
         DATA_DIR=str(config.data_dir),
         OPENAI_API_KEY="test-only-key",
         BACKEND_URL="http://127.0.0.1:8100",
-        PPTX_IMAGE_APPROVED_DOMAINS='["studio.test"]',
     )
     processes, logs = [], []
 

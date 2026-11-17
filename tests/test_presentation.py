@@ -1,6 +1,7 @@
 import copy
 import json
 from io import BytesIO
+from types import SimpleNamespace
 
 import httpx
 import pytest
@@ -76,6 +77,8 @@ def test_official_metadata_cover_is_validated_and_cached(preview_environment, pl
     assert result["source_url"] == state["image_url"]
     calls = len(state["requests"])
     assert service.resolve(item) == result
+    run = SimpleNamespace(results=[item], selection=SimpleNamespace(ordered_ids=[item.id]))
+    assert service.for_export(run) == {item.id: result}
     assert len(state["requests"]) == calls
     assert all(request.url.host == PUBLIC_IP for request in state["requests"])
     assert all(

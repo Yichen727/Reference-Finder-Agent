@@ -150,7 +150,12 @@ class ThumbnailService:
         ).hexdigest()
 
     def for_export(self, run) -> dict:
-        """Reuse cached bytes only with reproduction permission; never fetch during export."""
+        """Place the card's validated, permitted preview in the user's reference pack.
+
+        Preview discovery already checks the source and preview permissions. Reuse
+        that cache without a second domain allowlist or any export-time downloads;
+        retain the source and permission basis for the slide's speaker notes.
+        """
         selected = set(run.selection.ordered_ids) if run.selection else set()
         previews = {}
         for item in run.results:
@@ -159,13 +164,7 @@ class ThumbnailService:
             cached = self.store.preview(self.cache_key(item))
             if not cached or not cached.get("image"):
                 continue
-            licensed = re.fullmatch(
-                r"Image license: https://creativecommons\.org/(?:licenses/(?:by|by-sa)/(?:[1-4]\.0|2\.5)|publicdomain/zero/1\.0)/?",
-                cached.get("basis", ""),
-            )
-            approved = domain_matches(str(item.source_url), self.settings.pptx_image_approved_domains)
-            if licensed or approved:
-                previews[item.id] = cached
+            previews[item.id] = cached
         return previews
 
     def resolve(self, item, *, deadline=None) -> dict:

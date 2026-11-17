@@ -72,9 +72,10 @@ enter **Y**.
    original closing page. Four selected references produce seven slides.
 
 Continue editing the downloaded file in PowerPoint. Source evidence, verification,
-production considerations, and rights notes are included in speaker notes. Images
-need permission for deck reproduction; a preview visible in the app may use a placeholder
-in the exported pack. Exporting does not make additional OpenAI calls.
+production considerations, and rights notes are included in speaker notes. Each slide
+reuses its card's cached thumbnail in the left image area, keeping the image's aspect
+ratio. Missing or invalid previews use a placeholder. Exporting does not make additional
+OpenAI calls or download new images.
 
 The default search requests 10 references; you can request up to 20. Some searches
 return fewer usable results. Sources include Vimeo, YouTube, Instagram, Pinterest,

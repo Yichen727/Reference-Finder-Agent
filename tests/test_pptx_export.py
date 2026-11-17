@@ -207,24 +207,71 @@ def test_long_text_is_rejected_without_truncating_or_losing_the_saved_analysis(c
     )
 
 
-def test_preview_permission_is_separate_from_export_permission(client):
-    run, _ = selected_run(client)
+def test_export_reuses_card_previews_in_the_matching_slide_image_areas(client, monkeypatch):
+    run, chosen = selected_run(client)
     workflow, service = client.app.state.workflow, client.app.state.thumbnails
-    item = workflow.run(run["id"]).results[0]
-    image = BytesIO()
-    Image.new("RGB", (100, 50), "#ff0069").save(image, "PNG")
-    preview = {
-        "image": "data:image/png;base64," + base64.b64encode(image.getvalue()).decode(),
-        "basis": "Official video preview",
-        "source_url": "https://studio.test/image.png",
-    }
-    service.store.save_preview(service.cache_key(item), preview, 3600)
-    assert service.for_export(workflow.run(run["id"])) == {}
-    service.settings.pptx_image_approved_domains = ["studio.test"]
-    assert item.id in service.for_export(workflow.run(run["id"]))
+    current = workflow.run(run["id"])
+    by_id = {item.id: item for item in current.results}
+    expected = {}
+    colours = {chosen[0]["id"]: (255, 0, 105), chosen[2]["id"]: (33, 77, 72)}
+    for item_id, colour in colours.items():
+        image = BytesIO()
+        Image.new("RGB", (160, 90), colour).save(image, "PNG")
+        preview = {
+            "image": "data:image/png;base64," + base64.b64encode(image.getvalue()).decode(),
+            "basis": "Official video preview",
+            "source_url": f"https://studio.test/{item_id}.png",
+        }
+        service.store.save_preview(service.cache_key(by_id[item_id]), preview, 3600)
+        expected[item_id] = preview
+    assert service.for_export(current) == expected
+    monkeypatch.setattr(service, "resolve", lambda *args, **kwargs: pytest.fail("Use cached card images"))
     record = export(client, run).json()
-    with ZipFile(BytesIO(client.get(f"/exports/{record['id']}/download").content)) as archive:
-        assert any(name.startswith("ppt/media/referencePreview") for name in archive.namelist())
+    content = client.get(f"/exports/{record['id']}/download").content
+    template = Package(pptx_export.TEMPLATE_DIR / pptx_export.SINGLE_TEMPLATE)
+    original_slide = xml(template.parts[template.slide_paths()[0]])
+    original_area = pptx_export.named_shapes(original_slide)["Rectangle 6"]
+    with ZipFile(BytesIO(content)) as archive:
+        assert (
+            len([name for name in archive.namelist() if name.startswith("ppt/media/referencePreview")]) == 2
+        )
+        for slide, item in zip(slides_from_bytes(content)[2:-1], chosen, strict=True):
+            area = next(
+                shape
+                for shape in slide.findall(".//p:sp", NS)
+                if shape.find("p:nvSpPr/p:cNvPr", NS).get("name") == "Rectangle 6"
+            )
+            for component in ["off", "ext"]:
+                assert (
+                    area.find(f"p:spPr/a:xfrm/a:{component}", NS).attrib
+                    == original_area.find(f"p:spPr/a:xfrm/a:{component}", NS).attrib
+                )
+            blip = area.find("p:spPr/a:blipFill/a:blip", NS)
+            if item["id"] not in colours:
+                assert blip is None and "Preview unavailable" in slide_text(slide)
+                continue
+            assert blip is not None and "Preview unavailable" not in slide_text(slide)
+            slide_part = next(
+                name
+                for name in archive.namelist()
+                if name.startswith("ppt/slides/")
+                and name.endswith(".xml")
+                and item["title"].upper() in slide_text(xml(archive.read(name)))
+            )
+            relationships = xml(archive.read(slide_part.replace("slides/", "slides/_rels/") + ".rels"))
+            image_target = next(
+                node.get("Target") for node in relationships if node.get("Id") == blip.get(qn("r:embed"))
+            )
+            image_part = pptx_export.resolve(slide_part, image_target)
+            with Image.open(BytesIO(archive.read(image_part))) as image:
+                assert image.getpixel((600, 338)) == colours[item["id"]]
+        notes = b"\n".join(
+            archive.read(name)
+            for name in archive.namelist()
+            if name.startswith("ppt/notesSlides/") and name.endswith(".xml")
+        )
+        for preview in expected.values():
+            assert preview["source_url"].encode() in notes and preview["basis"].encode() in notes
 
 
 def test_deleting_research_revokes_pptx_download_but_retains_the_file(client, settings):
@@ -238,7 +285,6 @@ def test_deleting_research_revokes_pptx_download_but_retains_the_file(client, se
 def test_invalid_cached_images_use_the_placeholder_instead_of_breaking_export(client):
     run, _ = selected_run(client)
     service = client.app.state.thumbnails
-    service.settings.pptx_image_approved_domains = ["studio.test"]
     item = client.app.state.workflow.run(run["id"]).results[0]
     service.store.save_preview(
         service.cache_key(item),

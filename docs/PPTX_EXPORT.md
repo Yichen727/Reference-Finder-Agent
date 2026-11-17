@@ -34,23 +34,21 @@ entire Single template for each result. See Microsoft's
 [PresentationML structure](https://learn.microsoft.com/en-us/office/open-xml/presentation/structure-of-a-presentationml-document)
 for the relationship between slides, layouts, masters and themes.
 
-## Image permissions
+## Card thumbnails
 
-PPTX export uses only previously validated, cached raster bytes. Available app previews
-do not automatically establish permission to reproduce an image in an exported deck.
-Images are included when the cache records a supported image-specific Creative Commons
-license, or when a workspace administrator has explicitly cleared the original source
-domain for deck reproduction:
+Each reference slide reuses the same validated, cached preview as its result card,
+in the template's left `IMAGE HERE` area. Images retain their aspect ratio and are
+letterboxed rather than distorted. The exporter follows reference IDs and the saved
+pack order, so reordering cannot attach a different reference's thumbnail.
 
-```dotenv
-# Exact source domains with permission to reproduce their cached preview images.
-PPTX_IMAGE_APPROVED_DOMAINS=["your-authorised-studio.example"]
-```
-
-This is separate from `PREVIEW_APPROVED_DOMAINS`. Do not add a domain merely because
-it has a public video or `og:image`. Image URLs and permission bases appear in speaker
-notes. Missing, expired, invalid or unapproved cached images use a clean placeholder.
-The exporter never embeds full videos or fetches uncached images.
+Preview discovery still validates official video metadata or permitted website images,
+including URL, DNS, redirect, robots, file type and size checks. Export adds no second
+domain allowlist; the former `PPTX_IMAGE_APPROVED_DOMAINS` setting is no longer needed.
+`PREVIEW_APPROVED_DOMAINS` remains available for authorised website previews.
+The preview's source URL and permission basis, and the reference's rights information,
+remain in speaker notes; inclusion in a pack does not grant additional image rights.
+Missing, expired or invalid cached images use a clean placeholder. The exporter never
+embeds full videos, downloads uncached images, or calls OpenAI.
 
 ## API and compatibility
 

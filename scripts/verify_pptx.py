@@ -27,7 +27,6 @@ def main():
         _env_file=None,
         data_dir=folder,
         openai_api_key="test-only-key",
-        pptx_image_approved_domains=["studio.test"],
     )
     with TestClient(create_app(config)) as client:
         workflow = client.app.state.workflow
