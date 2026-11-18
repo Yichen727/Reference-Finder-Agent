@@ -100,6 +100,13 @@ reuses its card's cached thumbnail in the left image area, keeping the image's a
 ratio. Missing or invalid previews use a placeholder. Exporting does not make additional
 OpenAI calls or download new images.
 
+Article and project pages can reuse the official cover of a single associated YouTube or
+Vimeo video found in verified page evidence or readable page metadata. Pages with multiple
+videos do not get an arbitrary cover. Website images still require an image-specific license
+or permission configured by the workspace administrator. Missing previews explain their reason
+under **Source Evidence, Verification and Rights**; transient failures can retry on a later
+interaction after two minutes. Thumbnail retrieval never calls OpenAI.
+
 The default search requests 10 references; you can request up to 20. Some searches
 return fewer usable results. All eight source categories are selected by default:
 Video Platforms, Award Archives, Creative Press, Brand Film Showcases,

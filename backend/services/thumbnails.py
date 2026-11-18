@@ -8,6 +8,7 @@ import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from io import BytesIO
+from math import ceil
 from urllib.parse import parse_qs, urlencode, urljoin, urlsplit
 
 import httpx
@@ -18,6 +19,8 @@ from backend.services.source_policy import canonical_url, domain_matches
 
 PLACEHOLDER = {"image": None, "source_url": None, "basis": "Preview unavailable or permission unconfirmed."}
 IMAGE_TYPES = {"JPEG": "image/jpeg", "PNG": "image/png", "WEBP": "image/webp", "GIF": "image/gif"}
+PREVIEW_VERSION = 2
+FAILED_PREVIEW_TTL = 120
 
 
 class PreviewFetcher(PageVerifier):
@@ -62,7 +65,9 @@ class PreviewFetcher(PageVerifier):
                             str(httpx.URL(clean).copy_with(path="/", query=None)).rstrip("/")
                         )
                     if response.status_code != 200:
-                        raise CheckStopped("restricted", "Preview metadata or image is unavailable.")
+                        raise CheckStopped(
+                            "restricted", f"Preview source returned HTTP {response.status_code}."
+                        )
                     mime = response.headers.get("content-type", "").split(";", 1)[0].lower()
                     if mime not in types or response.headers.get("content-encoding", "identity") not in {
                         "",
@@ -85,9 +90,16 @@ class PreviewFetcher(PageVerifier):
 def video_metadata_url(source: str):
     parts = urlsplit(source)
     host = (parts.hostname or "").lower()
-    if host in {"youtube.com", "www.youtube.com", "m.youtube.com", "youtu.be"}:
+    if host in {
+        "youtube.com",
+        "www.youtube.com",
+        "m.youtube.com",
+        "youtu.be",
+        "youtube-nocookie.com",
+        "www.youtube-nocookie.com",
+    }:
         video_id = parts.path.strip("/") if host == "youtu.be" else parse_qs(parts.query).get("v", [""])[0]
-        if not video_id and re.match(r"^/(?:shorts|embed)/", parts.path):
+        if not video_id and re.match(r"^/(?:shorts|embed|live)/", parts.path):
             video_id = parts.path.split("/")[2]
         if re.fullmatch(r"[A-Za-z0-9_-]{11}", video_id):
             url = "https://www.youtube.com/watch?" + urlencode({"v": video_id})
@@ -96,13 +108,63 @@ def video_metadata_url(source: str):
                 ["ytimg.com"],
                 "YouTube oEmbed preview",
             )
-    if host in {"vimeo.com", "www.vimeo.com", "player.vimeo.com"} and re.search(r"/\d+(?:/|$)", parts.path):
+    if host in {"vimeo.com", "www.vimeo.com", "player.vimeo.com"}:
+        match = re.fullmatch(
+            r"/(?:video/|channels/[^/]+/|groups/[^/]+/videos/)?(\d+)(?:/([A-Za-z0-9_-]+))?/?",
+            parts.path,
+        )
+        if not match:
+            return None
+        # oEmbed requires the actual video link, including any supplied privacy hash.
+        video_id, path_hash = match.groups()
+        privacy_hash = path_hash or parse_qs(parts.query).get("h", [""])[0]
+        if privacy_hash and not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", privacy_hash):
+            return None
+        video_url = f"https://vimeo.com/{video_id}" + (f"/{privacy_hash}" if privacy_hash else "")
         return (
-            "https://vimeo.com/api/oembed.json?" + urlencode({"url": source, "maxwidth": 640}),
+            "https://vimeo.com/api/oembed.json?" + urlencode({"url": video_url, "maxwidth": 640}),
             ["vimeocdn.com"],
             "Vimeo oEmbed preview",
         )
     return None
+
+
+def single_embedded_provider(urls):
+    """Never choose an arbitrary film from a page containing several videos."""
+    providers = {}
+    for url in urls:
+        clean = canonical_url(str(url))
+        if clean and urlsplit(clean).port in {None, 80, 443}:
+            provider = video_metadata_url(clean)
+            if provider:
+                providers[provider[0]] = provider
+    return next(iter(providers.values())) if len(providers) == 1 else None
+
+
+def verified_embedded_provider(item, source):
+    page = item.page_check
+    if not page or page.status != "accessible" or not page.work_page:
+        return None
+    if canonical_url(source) not in {
+        canonical_url(str(page.original_url)),
+        canonical_url(str(page.final_url or "")),
+    }:
+        return None
+    return single_embedded_provider(page.media_urls)
+
+
+def provider_cover(fetcher, provider, *, embedded=False):
+    endpoint, domains, basis = provider
+    _, _, body = fetcher.fetch(endpoint, {"application/json"}, 100_000)
+    metadata = json.loads(body)
+    if not isinstance(metadata, dict):
+        raise CheckStopped("unverified", "Invalid preview metadata.")
+    image_url = canonical_url(str(metadata.get("thumbnail_url", "")))
+    if metadata.get("type") != "video" or not image_url or not domain_matches(image_url, domains):
+        raise CheckStopped("unverified", "Official preview metadata did not provide a valid cover.")
+    if embedded:
+        basis += " for the source page's embedded video"
+    return image_url, basis
 
 
 def licensed_image(parser: PublicHTML, image_url: str) -> str | None:
@@ -172,9 +234,13 @@ class ThumbnailService:
         approved = item.thumbnail.model_dump(mode="json") if item.thumbnail else None
         key = self.cache_key(item)
         cached = self.store.preview(key)
-        if cached is not None:
+        if cached is not None and (cached.get("image") or cached.get("preview_version") == PREVIEW_VERSION):
             return cached
-        result = dict(PLACEHOLDER)
+        result = {
+            **PLACEHOLDER,
+            "preview_version": PREVIEW_VERSION,
+            "reason": "No permitted preview metadata was found.",
+        }
         try:
             fetcher = self.fetcher_factory(self.settings)
             if deadline is not None:
@@ -190,33 +256,36 @@ class ThumbnailService:
             ):
                 image_url, basis = approved["url"], "Previously approved preview metadata"
             elif provider:
-                endpoint, domains, basis = provider
-                _, _, body = fetcher.fetch(endpoint, {"application/json"}, 100_000)
-                metadata = json.loads(body)
-                if not isinstance(metadata, dict):
-                    raise CheckStopped("unverified", "Invalid preview metadata.")
-                image_url = canonical_url(str(metadata.get("thumbnail_url", "")))
-                if metadata.get("type") != "video" or not image_url or not domain_matches(image_url, domains):
-                    raise CheckStopped(
-                        "unverified", "Official preview metadata did not provide a valid cover."
-                    )
+                image_url, basis = provider_cover(fetcher, provider)
+            elif embedded := verified_embedded_provider(item, source):
+                image_url, basis = provider_cover(fetcher, embedded, embedded=True)
             elif item.platform not in {"Instagram", "Pinterest", "YouTube", "Vimeo"}:
                 page_url, _, body = fetcher.fetch(source, {"text/html", "application/xhtml+xml"}, 500_000)
                 parser = PublicHTML(page_url)
                 parser.feed(body.decode("utf-8", errors="replace"))
-                image_url = (
-                    canonical_url(urljoin(page_url, parser.meta.get("og:image", "")))
-                    if parser.meta.get("og:image")
-                    else None
-                )
-                if image_url:
-                    license_url = licensed_image(parser, image_url)
-                    if license_url:
-                        basis = "Image license: " + license_url
-                    elif domain_matches(page_url, self.settings.preview_approved_domains):
-                        basis = "Website preview permission configured by workspace administrator"
-                    else:
-                        image_url = None
+                parser.extract()
+                embedded = single_embedded_provider(parser.media)
+                if embedded:
+                    image_url, basis = provider_cover(fetcher, embedded, embedded=True)
+                else:
+                    image_url = (
+                        canonical_url(urljoin(page_url, parser.meta.get("og:image", "")))
+                        if parser.meta.get("og:image")
+                        else None
+                    )
+                    if image_url:
+                        license_url = licensed_image(parser, image_url)
+                        if license_url:
+                            basis = "Image license: " + license_url
+                        elif domain_matches(page_url, self.settings.preview_approved_domains):
+                            basis = "Website preview permission configured by workspace administrator"
+                        else:
+                            image_url = None
+                            result["reason"] = "Website image permission has not been established."
+                    elif len(parser.media) > 1:
+                        result["reason"] = (
+                            "The source page contains several videos; no single cover was chosen."
+                        )
             if image_url:
                 final, mime, body = fetcher.fetch(image_url, set(IMAGE_TYPES.values()), 2_000_000)
                 with Image.open(BytesIO(body)) as image:
@@ -231,6 +300,7 @@ class ThumbnailService:
                     "image": f"data:{mime};base64," + base64.b64encode(body).decode("ascii"),
                     "source_url": final,
                     "basis": basis,
+                    "preview_version": PREVIEW_VERSION,
                 }
         except (
             CheckStopped,
@@ -242,15 +312,21 @@ class ThumbnailService:
             KeyError,
             UnidentifiedImageError,
             Image.DecompressionBombError,
-        ):
-            pass
-        self.store.save_preview(key, result, 86400 if result["image"] else 3600)
+        ) as error:
+            result["reason"] = (
+                error.reason
+                if isinstance(error, CheckStopped)
+                else ("The preview source could not be reached or returned invalid image data.")
+            )
+        self.store.save_preview(key, result, 86400 if result["image"] else FAILED_PREVIEW_TTL)
         return result
 
     def for_run(self, run) -> dict:
         # Serialize enrichment batches to avoid duplicate downloads from concurrent sessions.
         with self.lock:
-            deadline = time.monotonic() + 20
+            # Every queued worker group gets time; later cards must not inherit an
+            # already-expired 20-second budget when a pack contains up to 20 items.
+            deadline = time.monotonic() + min(60, max(20, ceil(len(run.results) / 4) * 12))
             with ThreadPoolExecutor(max_workers=4) as pool:
                 previews = list(pool.map(lambda item: self.resolve(item, deadline=deadline), run.results))
         return {item.id: preview for item, preview in zip(run.results, previews, strict=True)}

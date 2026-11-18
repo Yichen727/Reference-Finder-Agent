@@ -1,5 +1,6 @@
 from importlib import reload
 from pathlib import Path
+from time import monotonic
 from uuid import uuid4
 
 import streamlit as st
@@ -422,14 +423,32 @@ def poll_run(run_id):
         display_error(error)
 
 
+def presentation_needs_refresh(run):
+    cached = st.session_state.get("presentations", {}).get(run["id"])
+    if cached is None or st.session_state.get("presentation_cache_version") != 2:
+        return True
+    missing = any(
+        not (cached.get("previews", {}).get(item["id"]) or {}).get("image") for item in run["results"]
+    )
+    loaded_at = st.session_state.get("presentation_loaded_at", {}).get(run["id"], 0)
+    return missing and monotonic() - loaded_at >= 120
+
+
 def presentation_for(run):
     presentations = st.session_state.setdefault("presentations", {})
-    if run["id"] not in presentations:
+    if st.session_state.get("presentation_cache_version") != 2:
+        presentations.clear()
+        st.session_state["presentation_cache_version"] = 2
+    loaded_at = st.session_state.setdefault("presentation_loaded_at", {})
+    cached = presentations.get(run["id"])
+    if presentation_needs_refresh(run):
         try:
             presentations[run["id"]] = client.request("GET", f"/search-runs/{run['id']}/presentation")
+            loaded_at[run["id"]] = monotonic()
         except APIError:
             # Preview enrichment never prevents browsing an existing result or exporting it.
-            presentations[run["id"]] = {"previews": {}}
+            # Do not persist a request failure as a permanent empty presentation.
+            return cached or {"previews": {}}
     return presentations[run["id"]]
 
 
@@ -507,6 +526,8 @@ def reference_details(run, item):
                 preview["basis"] + ". Preview use does not establish video or image reproduction rights."
             )
             st.link_button("Thumbnail Source", preview["source_url"])
+        elif preview and preview.get("reason"):
+            st.caption("Preview unavailable: " + preview["reason"])
         st.caption(
             "Source descriptions report evidence; borrowing ideas, route fit and production notes "
             "are creative interpretations."
@@ -640,7 +661,7 @@ def result_panel():
         return
     draft = draft_for(run)
     area = None
-    if run["id"] not in st.session_state.get("presentations", {}):
+    if presentation_needs_refresh(run):
         area = show_search_progress(4, "Loading reference cards and available previews.")
     try:
         presentation = presentation_for(run)

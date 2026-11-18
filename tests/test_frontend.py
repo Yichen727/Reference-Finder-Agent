@@ -30,6 +30,8 @@ def bridge(client, monkeypatch):
 
     def request(self, method, path, payload=None, *, binary=False):
         state["requests"].append((method, path, copy.deepcopy(payload)))
+        if path.endswith("/presentation") and state.get("fail_presentation"):
+            raise APIError("Preview service is temporarily unavailable.", status=503)
         if path == "/source-categories":
             if state.get("fail_sources"):
                 raise APIError("Source metadata is unavailable.", status=503)
@@ -235,6 +237,52 @@ def test_recent_research_and_results_show_generated_topic_instead_of_prompt_open
     widget(app.button, f"research_{run['id']}").click().run()
     assert widget(app.button, f"research_{run['id']}").label == "Human Side of AI"
     assert sum(method == "POST" and path.endswith("/strategy") for method, path, _ in bridge["requests"]) == 1
+
+
+def test_old_preview_session_cache_refreshes_without_losing_pack_draft(bridge):
+    app = launch(open_app(), count=4)
+    run = app.session_state["run"]
+    pick(app, run, 0)
+    before = copy.deepcopy(app.session_state["pack_drafts"][run["id"]])
+    calls = sum(path.endswith("/presentation") for _, path, _ in bridge["requests"])
+    app.session_state["presentation_cache_version"] = 1
+    app.run()
+    assert not app.exception
+    assert app.session_state["presentation_cache_version"] == 2
+    assert app.session_state["pack_drafts"][run["id"]] == before
+    assert sum(path.endswith("/presentation") for _, path, _ in bridge["requests"]) == calls + 1
+
+
+def test_preview_endpoint_failure_is_retried_instead_of_cached_as_permanently_empty(bridge):
+    bridge["fail_presentation"] = True
+    app = launch(open_app(), count=4)
+    run = app.session_state["run"]
+    assert run["id"] not in app.session_state["presentations"]
+    pick(app, run, 0)
+    before = copy.deepcopy(app.session_state["pack_drafts"][run["id"]])
+    bridge["fail_presentation"] = False
+    app.run()
+    assert not app.exception
+    assert run["id"] in app.session_state["presentations"]
+    assert app.session_state["pack_drafts"][run["id"]] == before
+    calls = sum(path.endswith("/presentation") for _, path, _ in bridge["requests"])
+    app.run()
+    assert sum(path.endswith("/presentation") for _, path, _ in bridge["requests"]) == calls
+
+
+def test_missing_previews_retry_after_cache_expiry_without_changing_selection(bridge):
+    app = launch(open_app(), count=4)
+    run = app.session_state["run"]
+    pick(app, run, 0)
+    before = copy.deepcopy(app.session_state["pack_drafts"][run["id"]])
+    calls = sum(path.endswith("/presentation") for _, path, _ in bridge["requests"])
+    app.session_state["presentation_loaded_at"][run["id"]] = -1000
+    app.run()
+    assert not app.exception
+    assert sum(path.endswith("/presentation") for _, path, _ in bridge["requests"]) == calls + 1
+    assert app.session_state["pack_drafts"][run["id"]] == before
+    app.run()
+    assert sum(path.endswith("/presentation") for _, path, _ in bridge["requests"]) == calls + 1
 
 
 @pytest.mark.parametrize("choices", [["Video & Film", "Studios & Production Companies"], []])
