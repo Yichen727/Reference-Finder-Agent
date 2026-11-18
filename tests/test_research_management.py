@@ -17,8 +17,8 @@ def test_manual_title_survives_reload_without_changing_research(client, monkeypa
     assert response.status_code == 200
     assert response.json() == {"id": run["id"], "title": "A Human View of AI"}
     monkeypatch.setattr(
-        "backend.services.presentation.research_title",
-        lambda prompt: pytest.fail("Do not regenerate a manual title"),
+        "openai.OpenAI",
+        lambda *args, **kwargs: pytest.fail("Do not regenerate a manual title"),
     )
     assert client.get("/search-runs").json()[0]["title"] == "A Human View of AI"
     store = PresentationStore(client.app.state.workflow.repository)

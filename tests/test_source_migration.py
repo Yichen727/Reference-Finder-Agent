@@ -258,6 +258,7 @@ def test_submission_without_optional_priority_can_be_retried(client):
     old_strategy = strategy(["Video Platforms"]).model_dump()
     old_strategy["brief_id"] = brief["id"]
     old_strategy.pop("source_priority")
+    old_strategy.pop("research_title")
     request = {"brief_id": brief["id"], "strategy": old_strategy, "idempotency_key": str(uuid4())}
     first = client.post("/search-runs", json=request)
     first.raise_for_status()

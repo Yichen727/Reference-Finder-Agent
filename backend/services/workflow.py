@@ -78,6 +78,8 @@ class Workflow:
         if not request.strategy.source_priority:
             # Keep fingerprints compatible with submissions saved before this field existed.
             payload["strategy"].pop("source_priority", None)
+        if not request.strategy.research_title:
+            payload["strategy"].pop("research_title", None)
         fingerprint = hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
         result, created = self.repository.create_run(run, request.idempotency_key, fingerprint)
         return SearchRun.model_validate(result), created

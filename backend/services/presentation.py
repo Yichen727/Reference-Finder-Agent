@@ -1,34 +1,9 @@
 """Persist small UI metadata separately from research records and search logic."""
 
 import json
-import re
 import time
 
-
-def research_title(prompt: str) -> str:
-    """Produce a short extractive label without another model request."""
-    text = re.sub(r"\s+", " ", prompt).strip()
-    text = re.sub(
-        r"^(?:(?:please\s+)?(?:create|find|research|explore|show|develop|make|give me|i need|we need)\s+)",
-        "",
-        text,
-        flags=re.I,
-    )
-    topic = re.split(r"\b(?:about|exploring|focused on|focusing on)\s+", text, maxsplit=1, flags=re.I)[-1]
-    topic = re.split(r"[.!?;:\n]|\s+(?:with|using|aimed at|targeting)\s+", topic, maxsplit=1, flags=re.I)[0]
-    topic = re.sub(r"^(?:a|an|the)\s+", "", topic, flags=re.I)
-    words = [word[:24] for word in re.findall(r"[A-Za-z0-9]+(?:[-'][A-Za-z0-9]+)*", topic)[:6]]
-    if not words:
-        words = ["Creative", "Reference", "Research"]
-    elif len(words) == 1:
-        words = [words[0], "Creative", "References"]
-    elif len(words) == 2:
-        words.append("References")
-    small = {"a", "an", "and", "as", "at", "by", "for", "in", "of", "on", "the", "to", "with"}
-    return " ".join(
-        word if word.isupper() else word.lower() if index and word.lower() in small else word.capitalize()
-        for index, word in enumerate(words)
-    )
+DEFAULT_RESEARCH_TITLE = "Creative Reference Research"
 
 
 class PresentationStore:
@@ -52,13 +27,10 @@ class PresentationStore:
             ).fetchone()
             if existing:
                 return existing["title"]
-            row = connection.execute(
-                "SELECT payload FROM records WHERE kind='brief' AND id=?", (run["brief_id"],)
-            ).fetchone()
-            prompt = json.loads(row["payload"])["concept"] if row else run["strategy"]["summary"]
-            connection.execute(
-                "INSERT OR IGNORE INTO research_titles VALUES (?, ?)", (run["id"], research_title(prompt))
-            )
+            # The planning response is already persisted with the research run.
+            # Reading a title must never invoke a model or excerpt the original prompt.
+            title = run["strategy"].get("research_title") or DEFAULT_RESEARCH_TITLE
+            connection.execute("INSERT OR IGNORE INTO research_titles VALUES (?, ?)", (run["id"], title))
             return connection.execute(
                 "SELECT title FROM research_titles WHERE run_id=?", (run["id"],)
             ).fetchone()["title"]

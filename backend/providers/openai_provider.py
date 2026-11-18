@@ -39,6 +39,12 @@ class OpenAIProvider:
                     "The model declined or did not complete a valid strategy.",
                     502,
                 )
+            if not response.output_parsed.research_title:
+                raise AppError(
+                    "invalid_model_output",
+                    "OpenAI did not return a research topic title. Please retry your search.",
+                    502,
+                )
             return SearchStrategy(
                 **response.output_parsed.model_dump(),
                 brief_id=brief.id,

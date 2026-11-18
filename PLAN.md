@@ -1,6 +1,8 @@
 # Atomized Reference Finder — MVP 实施计划
 
 更新日期：2026-11-18
+
+标题生成更新：点击 Find References 后，在现有 Brief 分析的同一次 LLM 请求中生成简短、完整的英文主题标题，通常 3–6 个词；保留关键主题、专有名称和作品类型，不再截取输入开头。标题随研究策略保存，并由 Recent Research 与结果标题共同使用；重开、刷新及查看详情不额外调用 LLM，人工重命名优先保留。
 当前进度：Phase 1–4 已实现；Streamlit 已支持真实外部搜索、双列视觉卡片、历史研究、拖拽参考包、只读分析及模板化 PPTX 导出。Mock 运行模式与示例数据未加入应用。
 来源迁移进度：第 12 节 **Source Architecture Migration — 8 Categories** 的 Migration Phase 1–3 已完成，前端从后端注册表读取 8 类 Sources、默认全选并保留已提交的来源偏好；后端支持受控调度和真实平台标识。Phase 4 保留为集中验收；内部案例 Phase 5 继续独立暂缓。
 

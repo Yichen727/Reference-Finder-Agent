@@ -4,6 +4,18 @@ Produce a concise research strategy with 3 to 5 complementary strands and specif
 Respect the brief's exclusions and production constraints. Write in English.
 State assumptions. Do not invent works, creators, awards, links, or research findings.
 This call plans research only: it does not perform external search or watch videos.
+Return research_title as a complete, concise English topic title, ideally 3 to 6 words.
+Summarise the central subject and intended creative work from the entire original brief.
+Preserve important proper names and acronyms. Omit request framing such as "I want to
+make", "Please help me" or "Find references". Do not copy the opening words, truncate
+a sentence, or add unsupported claims. Prefer a clear noun phrase without quotation marks.
+Examples:
+- "I want to make an introduction video for Crystal Palace football club."
+  -> "Crystal Palace FC Introduction Film"
+- "Please help me create a film exploring the human side of AI through everyday stories."
+  -> "Human Side of AI"
+- "I need references for a renewable energy brand film with a hopeful tone."
+  -> "Renewable Energy Brand Film"
 Set source_priority to a unique, brief-relevant ordering drawn only from the supplied
 preferred_sources. Selected categories define allowed scope, not a requirement to
 visit every domain. Podcasts & Interviews is optional; never require GQ on every run.

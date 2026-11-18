@@ -64,9 +64,19 @@ class QueryStrand(Model):
 
 class StrategyDraft(Model):
     summary: str = Field(min_length=1, max_length=2000)
+    research_title: str = Field(
+        default_factory=str,
+        max_length=100,
+        description="A complete English topic title, ideally 3 to 6 words, summarising the entire brief.",
+    )
     assumptions: list[Text] = Field(default_factory=list, max_length=10)
     strands: list[QueryStrand] = Field(min_length=1, max_length=5)
     source_priority: list[SourceCategory] = Field(default_factory=list, max_length=8)
+
+    @field_validator("research_title")
+    @classmethod
+    def single_line_title(cls, value):
+        return " ".join(value.split())
 
 
 class SearchStrategy(StrategyDraft):

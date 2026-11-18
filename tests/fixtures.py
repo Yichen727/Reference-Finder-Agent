@@ -16,6 +16,7 @@ class FixtureProvider:
         return SearchStrategy(
             brief_id=brief.id,
             summary="A test research direction",
+            research_title="Human Side of AI",
             assumptions=[],
             preferred_sources=brief.preferred_sources,
             strands=[QueryStrand(name="Story", intent="Find human stories", queries=["human story film"])],

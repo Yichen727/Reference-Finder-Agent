@@ -9,7 +9,7 @@ from PIL import Image
 
 from backend.repositories.sqlite import Repository
 from backend.schemas.models import StoredBrief
-from backend.services.presentation import PresentationStore, research_title
+from backend.services.presentation import DEFAULT_RESEARCH_TITLE, PresentationStore
 from backend.services.thumbnails import PreviewFetcher, ThumbnailService, video_metadata_url
 from frontend.curation import apply_pack_action
 from tests.conftest import completed_run
@@ -157,23 +157,24 @@ def test_vimeo_metadata_preserves_unlisted_access_hash():
         "A" * 6000,
     ],
 )
-def test_titles_stay_within_three_to_six_words(prompt):
-    title = research_title(prompt)
-    assert 3 <= len(title.split()) <= 6
-    assert "\n" not in title
+def test_untitled_older_research_gets_neutral_label_without_excerpting_prompt(client, prompt):
+    run, _ = completed_run(client)
+    run["strategy"].pop("research_title")
+    run["strategy"]["summary"] = prompt
+    store = client.app.state.presentation
+    assert store.title(run) == DEFAULT_RESEARCH_TITLE
 
 
-def test_recent_title_uses_original_prompt_and_survives_restart(client, monkeypatch):
+def test_recent_title_uses_saved_model_topic_and_survives_restart(client, monkeypatch):
     run, _ = completed_run(client)
     brief = client.app.state.workflow.brief(run["brief_id"])
-    brief.concept = "Create a short film about the human side of AI with warmth."
+    brief.concept = "I want to make a completely different introduction video."
     client.app.state.workflow.repository.put("brief", brief)
     before = client.get(f"/search-runs/{run['id']}").json()
     title = client.get("/search-runs").json()[0]["title"]
     assert title == "Human Side of AI"
-    monkeypatch.setattr(
-        "backend.services.presentation.research_title", lambda prompt: pytest.fail("Title must be persisted")
-    )
+    assert title == before["strategy"]["research_title"]
+    monkeypatch.setattr("openai.OpenAI", lambda *args, **kwargs: pytest.fail("Title must be persisted"))
     replacement = PresentationStore(client.app.state.workflow.repository)
     replacement.initialize()
     assert replacement.title(before) == title

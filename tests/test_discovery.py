@@ -154,6 +154,7 @@ def discovery_api(monkeypatch):
         def parse(self, **kwargs):
             if kwargs["text_format"] is StrategyDraft:
                 draft = StrategyDraft(
+                    research_title="Human Environmental Campaign Films",
                     source_priority=state.get("source_priority", []),
                     summary="Research warm environmental films",
                     assumptions=[],

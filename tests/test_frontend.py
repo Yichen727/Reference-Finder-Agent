@@ -223,6 +223,20 @@ def test_source_categories_come_from_backend_with_all_eight_selected_and_are_cac
     assert sum(path == "/source-categories" for _, path, _ in bridge["requests"]) == 1
 
 
+def test_recent_research_and_results_show_generated_topic_instead_of_prompt_opening(bridge):
+    prompt = "Please help me create a film exploring the human side of AI through everyday stories."
+    app = launch(open_app(), concept=prompt, count=4)
+    run = app.session_state["run"]
+    assert run["strategy"]["research_title"] == "Human Side of AI"
+    assert widget(app.button, f"research_{run['id']}").label == "Human Side of AI"
+    assert any(item.value == "4 Results · Human Side of AI" for item in app.caption)
+    assert app.session_state["brief"]["concept"] == prompt
+    app.run()
+    widget(app.button, f"research_{run['id']}").click().run()
+    assert widget(app.button, f"research_{run['id']}").label == "Human Side of AI"
+    assert sum(method == "POST" and path.endswith("/strategy") for method, path, _ in bridge["requests"]) == 1
+
+
 @pytest.mark.parametrize("choices", [["Video & Film", "Studios & Production Companies"], []])
 def test_old_source_cache_refreshes_once_without_losing_draft_preferences(bridge, choices):
     from config import current_source_name

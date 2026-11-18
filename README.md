@@ -109,6 +109,9 @@ Internal case studies are planned for a later phase.
 
 Use **New Research** in the sidebar to start again. Click a title under **Recent Research**
 to reopen a search; its **...** menu lets you rename or delete it after confirmation.
+New research gets a concise topic title from the same AI call that analyses your brief.
+The title is saved and reused in Recent Research and the results header; reopening research
+does not make another AI request, and manually renamed titles are preserved.
 Export your pack before closing the browser to save your selection and order for next time.
 Research is stored locally in `data/reference_finder.sqlite3`, and exports in `data/exports/`.
 
