@@ -64,6 +64,13 @@ class QueryStrand(Model):
 
 class StrategyDraft(Model):
     summary: str = Field(min_length=1, max_length=2000)
+    constraints: str = Field(
+        default_factory=str,
+        max_length=6000,
+        description=(
+            "Explicit constraints from the complete brief; empty when none are stated. Do not invent any."
+        ),
+    )
     research_title: str = Field(
         default_factory=str,
         max_length=100,

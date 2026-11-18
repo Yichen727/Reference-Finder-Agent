@@ -148,7 +148,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.post("/briefs/{brief_id}/strategy", response_model=SearchStrategy)
     def create_strategy(brief_id: UUID):
-        return workflow.provider.strategy(workflow.brief(str(brief_id)))
+        brief = workflow.brief(str(brief_id))
+        strategy = workflow.provider.strategy(brief)
+        if strategy.constraints and not brief.constraints:
+            # Keep the original concept intact; expose extracted constraints to
+            # search and feasibility scoring just like the optional API field.
+            brief.constraints = strategy.constraints
+            repo.put("brief", brief)
+        return strategy
 
     @app.post("/search-runs", response_model=SearchRun, status_code=202)
     def submit_run(value: SearchRequest, background: BackgroundTasks):

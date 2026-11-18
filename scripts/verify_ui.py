@@ -689,11 +689,11 @@ def main():
         source_tags = (
             "document.querySelectorAll('.st-key-brief_sources [aria-label=\"Selected values\"] [data-tag]')"
         )
-        cdp.evaluate(
-            "[...document.querySelectorAll('summary')]"
-            ".find(e=>e.innerText.includes('Advanced Options')).click()"
-        )
         wait_until(lambda: cdp.evaluate(f"{source_tags}.length===8"))
+        assert cdp.evaluate(
+            "![...document.querySelectorAll('summary')].some(e=>e.innerText.includes('Advanced Options'))"
+            " && document.querySelector('.st-key-brief_sources').getBoundingClientRect().height>0"
+        )
         assert len(expected_sources) == 8
         assert cdp.evaluate(
             f"{json.dumps(expected_sources)}.every(name=>document.querySelector('.st-key-brief_sources').innerText.includes(name))"

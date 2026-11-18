@@ -80,6 +80,8 @@ class Workflow:
             payload["strategy"].pop("source_priority", None)
         if not request.strategy.research_title:
             payload["strategy"].pop("research_title", None)
+        if not request.strategy.constraints:
+            payload["strategy"].pop("constraints", None)
         fingerprint = hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
         result, created = self.repository.create_run(run, request.idempotency_key, fingerprint)
         return SearchRun.model_validate(result), created

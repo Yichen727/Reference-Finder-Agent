@@ -128,7 +128,7 @@ def reorder(app, run, ids):
 def test_home_is_simple_and_defaults_launch_with_one_click(bridge, client):
     app = open_app()
     assert app.title[0].value == "Atomized Reference Finder"
-    assert all(not item.proto.expanded for item in app.expander)
+    assert not app.expander
     assert [item.label for item in app.main.button if item.proto.type == "primary"] == ["Find References"]
     area(app, "Describe your creative idea").input("An optimistic character-led campaign")
     button(app, "Find References").click().run()
@@ -196,22 +196,45 @@ def test_remove_and_navigation_preserve_unsaved_annotation_drafts(bridge):
     assert not app.text_area
 
 
-def test_search_options_only_expose_sources_count_and_constraints(bridge, client):
+def test_search_options_only_expose_sources_and_count_with_a_single_natural_language_brief(bridge, client):
     app = open_app()
-    assert [item.label for item in app.text_area] == ["Describe your creative idea", "Creative Constraints"]
+    assert not app.expander
+    assert [item.label for item in app.text_area] == ["Describe your creative idea"]
     assert [item.label for item in app.multiselect] == ["Sources"]
     assert [item.label for item in app.number_input] == ["Reference Count"]
     assert not app.text_input and not app.checkbox
-    area(app, "Creative Constraints").input("One location, no dialogue, avoid aerial shots")
-    launch(app, concept="A playful 30-second film for young commuters")
+    prompt = "A playful 30-second film for young commuters. One location, no dialogue, avoid aerial shots."
+    launch(app, concept=prompt, count=4)
     assert not app.exception
     brief = app.session_state["brief"]
-    assert brief["constraints"] == "One location, no dialogue, avoid aerial shots"
+    assert brief["concept"] == prompt
     submitted = next(
         payload for method, path, payload in bridge["requests"] if method == "POST" and path == "/briefs"
     )
-    assert set(submitted) == {"concept", "constraints", "preferred_sources", "requested_count"}
+    assert set(submitted) == {"concept", "preferred_sources", "requested_count"}
+    assert submitted["concept"] == prompt
     assert app.session_state["run"]["strategy"]["strands"]
+
+
+@pytest.mark.parametrize("already_in_brief", [False, True])
+def test_previous_constraints_draft_merges_into_main_brief_once(bridge, already_in_brief):
+    app = open_app()
+    constraints = "One location, no dialogue, avoid aerial shots."
+    prompt = "A playful film for young commuters."
+    if already_in_brief:
+        prompt += " " + constraints
+    widget(app.multiselect, "brief_sources").set_value([])
+    area(app, "Describe your creative idea").input(prompt)
+    button(app, "Find References").click().run()  # Save the form without starting a search.
+    app.session_state["brief_constraints"] = constraints
+    app.run()
+    assert not app.exception
+    value = area(app, "Describe your creative idea").value
+    assert value.startswith(prompt) and value.count(constraints) == 1
+    assert "brief_constraints" not in app.session_state
+    assert [item.label for item in app.text_area] == ["Describe your creative idea"]
+    app.run()
+    assert area(app, "Describe your creative idea").value == value
 
 
 def test_source_categories_come_from_backend_with_all_eight_selected_and_are_cached(bridge):
@@ -220,7 +243,7 @@ def test_source_categories_come_from_backend_with_all_eight_selected_and_are_cac
     sources = widget(app.multiselect, "brief_sources")
     assert sources.options == sources.value == expected
     assert "Podcasts & Interviews" in sources.options
-    assert all(not item.proto.expanded for item in app.expander)
+    assert not app.expander
     app.run()
     assert sum(path == "/source-categories" for _, path, _ in bridge["requests"]) == 1
 
@@ -341,13 +364,12 @@ def test_unavailable_sources_disable_search_and_retry_without_losing_form_input(
     app = open_app()
     assert app.error and button(app, "Find References").disabled
     assert not app.multiselect
-    area(app, "Describe your creative idea").input("Keep this unfinished creative idea")
-    area(app, "Creative Constraints").input("One location")
+    prompt = "Keep this unfinished creative idea. One location, no dialogue."
+    area(app, "Describe your creative idea").input(prompt)
     bridge["fail_sources"] = False
     button(app, "Retry Sources").click().run()
     assert not app.error and not app.exception
-    assert area(app, "Describe your creative idea").value == "Keep this unfinished creative idea"
-    assert area(app, "Creative Constraints").value == "One location"
+    assert area(app, "Describe your creative idea").value == prompt
     assert widget(app.multiselect, "brief_sources").value == list(load_source_registry().categories)
     assert not button(app, "Find References").disabled
     assert not any(method == "POST" for method, _, _ in bridge["requests"])

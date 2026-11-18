@@ -74,8 +74,11 @@ values with `status`, `stop`, and `restart` as you used to start the app.
 
 ## 4. Build your reference pack
 
-1. **Enter your creative idea** and click **Find References**. Optionally use
-   **Advanced Options** to choose sources, reference count, and creative constraints.
+1. **Enter your creative idea** and click **Find References**.
+   Include creative constraints directly in **Describe your creative idea**, such as
+   budget, timing, required elements or things to avoid. Choose **Sources** and
+   **Reference Count** directly below the input. The existing brief-analysis call extracts
+   explicit constraints for search and feasibility scoring without another AI request.
    The five-stage indicator follows brief analysis, source selection, search,
    verification/ranking, and result preparation. The bar counts completed stages;
    it does not estimate time remaining. Results replace it when ready.
@@ -143,7 +146,7 @@ Research is stored locally in `data/reference_finder.sqlite3`, and exports in `d
 | A port is already in use | Run `.\.venv\Scripts\python.exe run.py status`. This project's old services are cleaned up on startup. For another application's port, stop that app yourself or choose unused ports with `--backend-port` and `--frontend-port`. |
 | No usable references are found | Try a clearer prompt, broader sources, or fewer creative constraints. |
 | A thumbnail is missing | The preview is unavailable or restricted. Use **Link** to view the original. |
-| Source options cannot load | Click **Retry Sources**. Your entered idea and constraints are kept. |
+| Source options cannot load | Click **Retry Sources**. Your complete creative brief is kept. |
 | Export reports a saved-pack conflict | **Load Saved Pack** replaces your current draft with the saved version. Review it before exporting again. |
 | Export asks for a workspace restart | Your pack has been saved. Stop the old launcher, restart it, reopen the research, and export again. |
 | A reference's text exceeds one slide | Remove the named reference and retry. Its full analysis remains in the saved research. |

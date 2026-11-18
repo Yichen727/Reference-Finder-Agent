@@ -338,6 +338,13 @@ def source_categories():
 
 
 def brief_form(health):
+    previous_constraints = st.session_state.pop("brief_constraints", "").strip()
+    if previous_constraints:
+        current = st.session_state.get("brief_concept", "")
+        if previous_constraints not in current:
+            st.session_state["brief_concept"] = (
+                f"{current.rstrip()}\n\nConstraints: {previous_constraints}".strip()
+            )
     try:
         categories = source_categories()
     except APIError:
@@ -348,30 +355,26 @@ def brief_form(health):
             "Describe your creative idea",
             key="brief_concept",
             height=180,
-            placeholder="A short film that makes a complex idea feel human...",
+            placeholder=(
+                "Describe your idea, audience, format and tone. Include any budget, timing, "
+                "required elements or things to avoid."
+            ),
         )
-        with st.expander("Advanced Options"):
-            if categories is not None:
-                options = [category["name"] for category in categories]
-                choices = st.session_state.get(
-                    "research_source_choices",
-                    [category["name"] for category in categories if category["default_selected"]],
-                )
-                if "brief_sources" not in st.session_state:
-                    st.session_state["brief_sources"] = [choice for choice in choices if choice in options]
-                sources = st.multiselect("Sources", options, key="brief_sources")
-            else:
-                sources = []
-                st.caption("Sources will appear once the options have loaded.")
-            count = st.number_input(
-                "Reference Count", 1, health["max_references"], min(10, health["max_references"])
+        if categories is not None:
+            options = [category["name"] for category in categories]
+            choices = st.session_state.get(
+                "research_source_choices",
+                [category["name"] for category in categories if category["default_selected"]],
             )
-            constraints = st.text_area(
-                "Creative Constraints",
-                key="brief_constraints",
-                height=90,
-                placeholder="Budget, timing, required elements, or anything to avoid (optional)",
-            )
+            if "brief_sources" not in st.session_state:
+                st.session_state["brief_sources"] = [choice for choice in choices if choice in options]
+            sources = st.multiselect("Sources", options, key="brief_sources")
+        else:
+            sources = []
+            st.caption("Sources will appear once the options have loaded.")
+        count = st.number_input(
+            "Reference Count", 1, health["max_references"], min(10, health["max_references"])
+        )
         submit = st.form_submit_button("Find References", type="primary", disabled=categories is None)
         if categories is None:
             # Submit the form to preserve its pending inputs while retrying metadata.
@@ -394,7 +397,6 @@ def brief_form(health):
         st.session_state["pending_research"] = {
             "brief_input": {
                 "concept": concept,
-                "constraints": constraints,
                 "preferred_sources": sources,
                 "requested_count": int(count),
             },

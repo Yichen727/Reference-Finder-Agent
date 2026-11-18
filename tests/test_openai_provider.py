@@ -114,6 +114,64 @@ def test_generated_title_whitespace_is_normalized_without_truncating_meaning():
     assert draft.research_title == "Crystal Palace FC Introduction Film"
 
 
+def test_main_brief_constraints_are_extracted_once_and_reach_search_and_feasibility_scoring(
+    settings, fake_model
+):
+    from backend.schemas.models import StoredBrief
+    from backend.services.ranking import score_reference
+    from tests.test_ranking import reference
+
+    calls, fake_class = fake_model
+    prompt = "A playful 30-second film for commuters. One location, no dialogue, avoid aerial shots."
+    constraints = "One location; no dialogue; avoid aerial shots."
+    fake_class.draft = fake_class.draft.model_copy(update={"constraints": constraints})
+    received = []
+    provider = FixtureProvider()
+
+    def search(brief, strategy, progress=None):
+        received.append(brief.constraints)
+        return provider.search(brief, strategy, progress)
+
+    with TestClient(create_app(settings)) as client:
+        client.app.state.workflow.provider.search = search
+        brief = client.post("/briefs", json={"concept": prompt, "requested_count": 4}).json()
+        plan = client.post(f"/briefs/{brief['id']}/strategy").json()
+        stored = client.get(f"/briefs/{brief['id']}").json()
+        assert plan["constraints"] == stored["constraints"] == constraints
+        assert stored["concept"] == json.loads(calls[0]["input"])["concept"] == prompt
+        assert "Return constraints" in calls[0]["instructions"]
+        response = client.post(
+            "/search-runs",
+            json={"brief_id": brief["id"], "strategy": plan, "idempotency_key": "single-input-constraints"},
+        )
+        assert response.status_code == 202
+        assert received == [constraints]
+        candidate = reference()
+        assert score_reference(candidate, StoredBrief.model_validate(stored), set(candidate.evidence_ids))
+        assert candidate.ranking.components["feasibility"] == 4
+    assert len(calls) == 1
+
+
+@pytest.mark.parametrize("existing", ["", "Budget: GBP 5000; one location."])
+def test_constraint_extraction_does_not_invent_or_overwrite_explicit_api_constraints(
+    settings, fake_model, existing
+):
+    calls, fake_class = fake_model
+    fake_class.draft = fake_class.draft.model_copy(
+        update={"constraints": "" if not existing else "A shorter model summary."}
+    )
+    with TestClient(create_app(settings)) as client:
+        brief = client.post(
+            "/briefs", json={"concept": "A warm community film", "constraints": existing}
+        ).json()
+        plan = client.post(f"/briefs/{brief['id']}/strategy")
+        assert plan.status_code == 200
+        saved = client.get(f"/briefs/{brief['id']}").json()
+        assert saved["constraints"] == existing
+        assert saved["concept"] == brief["concept"]
+    assert len(calls) == 1
+
+
 def test_openai_structured_check_has_no_search_claim_or_secret(settings, fake_model):
     settings.openai_api_key = SecretStr("test-secret-never-return-this")
     settings.openai_model = "configured-test-model"
