@@ -15,12 +15,24 @@ import httpx
 from PIL import Image, UnidentifiedImageError
 
 from backend.services.page_verification import USER_AGENT, CheckStopped, PageVerifier, PublicHTML
+from backend.services.preview_images import PreviewHTML
 from backend.services.source_policy import canonical_url, domain_matches
 
 PLACEHOLDER = {"image": None, "source_url": None, "basis": "Preview unavailable or permission unconfirmed."}
 IMAGE_TYPES = {"JPEG": "image/jpeg", "PNG": "image/png", "WEBP": "image/webp", "GIF": "image/gif"}
-PREVIEW_VERSION = 2
+PREVIEW_VERSION = 3
 FAILED_PREVIEW_TTL = 120
+PREVIEW_ERRORS = (
+    CheckStopped,
+    httpx.HTTPError,
+    OSError,
+    ValueError,
+    TypeError,
+    RecursionError,
+    KeyError,
+    UnidentifiedImageError,
+    Image.DecompressionBombError,
+)
 
 
 class PreviewFetcher(PageVerifier):
@@ -199,6 +211,90 @@ def licensed_image(parser: PublicHTML, image_url: str) -> str | None:
     return None
 
 
+def website_images(parser, approved_domains):
+    """Try the declared preview first, then up to three permitted body images."""
+    candidates, seen = [], set()
+    og_image = parser.meta.get("og:image", "")
+    preview = canonical_url(urljoin(parser.base_url, og_image)) if og_image else None
+    urls = [(preview, False)] if preview else []
+    urls.extend((url, True) for url in parser.body_images())
+    body_count = 0
+    for image_url, from_body in urls:
+        if image_url in seen or body_count >= 3:
+            continue
+        seen.add(image_url)
+        license_url = licensed_image(parser, image_url)
+        if license_url:
+            basis = "Image license: " + license_url
+        elif domain_matches(parser.base_url, approved_domains):
+            basis = "Website preview permission configured by workspace administrator"
+        else:
+            continue
+        if from_body:
+            basis = "First suitable article image. " + basis
+            body_count += 1
+        candidates.append((image_url, basis, from_body))
+    return candidates
+
+
+def preview_failure(error):
+    return (
+        error.reason
+        if isinstance(error, CheckStopped)
+        else ("The preview source could not be reached or returned invalid image data.")
+    )
+
+
+def website_previews(fetcher, item, source, approved_domains, result):
+    """Load body images only if the source's official video cover is unavailable."""
+    embedded = verified_embedded_provider(item, source)
+    attempted = set()
+    if embedded:
+        attempted.add(embedded[0])
+        try:
+            image_url, basis = provider_cover(fetcher, embedded, embedded=True)
+            yield image_url, basis, False
+        except PREVIEW_ERRORS as error:
+            result["reason"] = preview_failure(error)
+    page_url, _, body = fetcher.fetch(source, {"text/html", "application/xhtml+xml"}, 500_000)
+    parser = PreviewHTML(page_url)
+    parser.feed(body.decode("utf-8", errors="replace"))
+    parser.extract()
+    embedded = single_embedded_provider(parser.media)
+    if embedded and embedded[0] not in attempted:
+        try:
+            image_url, basis = provider_cover(fetcher, embedded, embedded=True)
+            yield image_url, basis, False
+        except PREVIEW_ERRORS as error:
+            result["reason"] = preview_failure(error)
+    candidates = website_images(parser, approved_domains)
+    if not candidates and (parser.meta.get("og:image") or parser.body_images()):
+        result["reason"] = "Website image permission has not been established."
+    elif not candidates and len(parser.media) > 1:
+        result["reason"] = "The source page contains several videos; no single cover was chosen."
+    yield from candidates
+
+
+def image_preview(fetcher, image_url, basis, *, from_body=False):
+    final, mime, body = fetcher.fetch(image_url, set(IMAGE_TYPES.values()), 2_000_000)
+    with Image.open(BytesIO(body)) as image:
+        if (
+            image.format not in IMAGE_TYPES
+            or IMAGE_TYPES[image.format] != mime
+            or image.width * image.height > 12_000_000
+        ):
+            raise CheckStopped("unverified", "Image format or dimensions are unsupported.")
+        if from_body and (image.width < 160 or image.height < 90):
+            raise CheckStopped("unverified", "Article image is too small for a reference preview.")
+        image.verify()
+    return {
+        "image": f"data:{mime};base64," + base64.b64encode(body).decode("ascii"),
+        "source_url": final,
+        "basis": basis,
+        "preview_version": PREVIEW_VERSION,
+    }
+
+
 class ThumbnailService:
     def __init__(self, settings, store, *, fetcher_factory=PreviewFetcher):
         self.settings, self.store, self.fetcher_factory = settings, store, fetcher_factory
@@ -248,6 +344,7 @@ class ThumbnailService:
             if not canonical_url(source):
                 return result
             image_url, basis = None, ""
+            candidates = []
             provider = video_metadata_url(source)
             if (
                 approved
@@ -257,67 +354,20 @@ class ThumbnailService:
                 image_url, basis = approved["url"], "Previously approved preview metadata"
             elif provider:
                 image_url, basis = provider_cover(fetcher, provider)
-            elif embedded := verified_embedded_provider(item, source):
-                image_url, basis = provider_cover(fetcher, embedded, embedded=True)
             elif item.platform not in {"Instagram", "Pinterest", "YouTube", "Vimeo"}:
-                page_url, _, body = fetcher.fetch(source, {"text/html", "application/xhtml+xml"}, 500_000)
-                parser = PublicHTML(page_url)
-                parser.feed(body.decode("utf-8", errors="replace"))
-                parser.extract()
-                embedded = single_embedded_provider(parser.media)
-                if embedded:
-                    image_url, basis = provider_cover(fetcher, embedded, embedded=True)
-                else:
-                    image_url = (
-                        canonical_url(urljoin(page_url, parser.meta.get("og:image", "")))
-                        if parser.meta.get("og:image")
-                        else None
-                    )
-                    if image_url:
-                        license_url = licensed_image(parser, image_url)
-                        if license_url:
-                            basis = "Image license: " + license_url
-                        elif domain_matches(page_url, self.settings.preview_approved_domains):
-                            basis = "Website preview permission configured by workspace administrator"
-                        else:
-                            image_url = None
-                            result["reason"] = "Website image permission has not been established."
-                    elif len(parser.media) > 1:
-                        result["reason"] = (
-                            "The source page contains several videos; no single cover was chosen."
-                        )
+                candidates = website_previews(
+                    fetcher, item, source, self.settings.preview_approved_domains, result
+                )
             if image_url:
-                final, mime, body = fetcher.fetch(image_url, set(IMAGE_TYPES.values()), 2_000_000)
-                with Image.open(BytesIO(body)) as image:
-                    if (
-                        image.format not in IMAGE_TYPES
-                        or IMAGE_TYPES[image.format] != mime
-                        or image.width * image.height > 12_000_000
-                    ):
-                        raise CheckStopped("unverified", "Image format or dimensions are unsupported.")
-                    image.verify()
-                result = {
-                    "image": f"data:{mime};base64," + base64.b64encode(body).decode("ascii"),
-                    "source_url": final,
-                    "basis": basis,
-                    "preview_version": PREVIEW_VERSION,
-                }
-        except (
-            CheckStopped,
-            httpx.HTTPError,
-            OSError,
-            ValueError,
-            TypeError,
-            RecursionError,
-            KeyError,
-            UnidentifiedImageError,
-            Image.DecompressionBombError,
-        ) as error:
-            result["reason"] = (
-                error.reason
-                if isinstance(error, CheckStopped)
-                else ("The preview source could not be reached or returned invalid image data.")
-            )
+                candidates.insert(0, (image_url, basis, False))
+            for image_url, basis, from_body in candidates:
+                try:
+                    result = image_preview(fetcher, image_url, basis, from_body=from_body)
+                    break
+                except PREVIEW_ERRORS as error:
+                    result["reason"] = preview_failure(error)
+        except PREVIEW_ERRORS as error:
+            result["reason"] = preview_failure(error)
         self.store.save_preview(key, result, 86400 if result["image"] else FAILED_PREVIEW_TTL)
         return result
 

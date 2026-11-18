@@ -103,7 +103,10 @@ OpenAI calls or download new images.
 Article and project pages can reuse the official cover of a single associated YouTube or
 Vimeo video found in verified page evidence or readable page metadata. Pages with multiple
 videos do not get an arbitrary cover. Website images still require an image-specific license
-or permission configured by the workspace administrator. Missing previews explain their reason
+or permission configured by the workspace administrator. If no usable cover is available,
+the first permitted, sufficiently large image in the article body can serve as the preview.
+Logos, avatars, hidden images and tracking pixels are skipped; lazy-loaded and responsive
+image URLs are supported. Missing previews explain their reason
 under **Source Evidence, Verification and Rights**; transient failures can retry on a later
 interaction after two minutes. Thumbnail retrieval never calls OpenAI.
 

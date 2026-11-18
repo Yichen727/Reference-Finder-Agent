@@ -50,7 +50,11 @@ def preview_environment(settings):
             return response(body=state["html"].encode())
         if state["redirect"]:
             return response(status=302, headers={"location": state["redirect"]})
-        return response(body=state["image"], headers={"content-type": "image/png"})
+        return response(
+            status=state.get("image_statuses", {}).get(request.url.path, 200),
+            body=state.get("image_bodies", {}).get(request.url.path, state["image"]),
+            headers={"content-type": "image/png"},
+        )
 
     def factory(config):
         return PreviewFetcher(config, resolver=public_dns, transport=httpx.MockTransport(handler))
