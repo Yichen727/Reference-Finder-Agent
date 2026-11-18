@@ -49,6 +49,29 @@ The app opens at **http://127.0.0.1:8501**. Keep the launcher window open while 
 To stop, press **Ctrl+C** in that window. If Windows asks to terminate the batch job,
 enter **Y**.
 
+You can also manage the app from another terminal in the project folder:
+
+```powershell
+.\.venv\Scripts\python.exe run.py status
+.\.venv\Scripts\python.exe run.py stop
+.\.venv\Scripts\python.exe run.py restart --open-browser
+```
+
+With the environment activated, `python run.py`, `python run.py stop`,
+`python run.py restart`, and `python run.py status` work as well.
+The same actions can be passed to `Start Reference Finder.bat`, for example
+`& ".\Start Reference Finder.bat" stop` in PowerShell.
+
+Startup checks both ports and replaces services identified as belonging to this project.
+If another application owns either port, the launcher reports its PID and leaves it running.
+On Windows, the two services and their child processes share a cleanup job: closing the
+terminal or forcibly ending the launcher also stops them. Ctrl+C and `stop` first allow
+the services to shut down gracefully, then force cleanup if necessary.
+PID identities are stored in `data/runtime/`; these records are checked against process
+creation times and command paths before cleanup. Research and exports are kept.
+Custom ports are still supported; use the same `--backend-port` and `--frontend-port`
+values with `status`, `stop`, and `restart` as you used to start the app.
+
 ## 4. Build your reference pack
 
 1. **Enter your creative idea** and click **Find References**. Optionally use
@@ -95,7 +118,7 @@ Research is stored locally in `data/reference_finder.sqlite3`, and exports in `d
 | --- | --- |
 | The launcher cannot find Python | Complete Step 1 from the project folder. |
 | Search is unavailable or the API reports an error | Check that `.env` is saved, the key is valid, and your account has the required model access and API credit. Stop and restart the app after changing `.env`. |
-| A port is already in use | Stop the previous launcher, or run `.\.venv\Scripts\python.exe run.py --backend-port 8001 --frontend-port 8502 --open-browser`. |
+| A port is already in use | Run `.\.venv\Scripts\python.exe run.py status`. This project's old services are cleaned up on startup. For another application's port, stop that app yourself or choose unused ports with `--backend-port` and `--frontend-port`. |
 | No usable references are found | Try a clearer prompt, broader sources, or fewer creative constraints. |
 | A thumbnail is missing | The preview is unavailable or restricted. Use **Link** to view the original. |
 | Source options cannot load | Click **Retry Sources**. Your entered idea and constraints are kept. |
