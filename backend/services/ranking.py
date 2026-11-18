@@ -7,6 +7,7 @@ from urllib.parse import parse_qs, urlsplit
 
 from backend.core.limits import MAX_REFERENCES
 from backend.schemas.models import RankingDetails, ReferenceItem, StoredBrief
+from config import current_source_name
 
 NOISE = {"official", "film", "video", "case", "study", "watch", "vimeo", "youtube", "www", "com"}
 WEIGHTS = {"relevance": 30, "specificity": 25, "craft": 15, "source": 20, "feasibility": 10}
@@ -112,7 +113,8 @@ def representative_priority(item: ReferenceItem):
 
 def original_source(item: ReferenceItem) -> bool:
     return item.platform in {"Studio portfolios", "Production companies"} or (
-        item.source_category == "Studios & Production Companies" and item.platform not in SOURCE_RATINGS
+        current_source_name(item.source_category or "") == "Studios & Agencies"
+        and item.platform not in SOURCE_RATINGS
     )
 
 
@@ -121,7 +123,7 @@ def source_rating(item: ReferenceItem) -> float:
         return SOURCE_RATINGS[item.platform]
     if original_source(item):
         return SOURCE_RATINGS["Studio portfolios"]
-    if item.source_category == "Awards & Winning Work":
+    if current_source_name(item.source_category or "") == "Award Archives":
         return SOURCE_RATINGS["Award archives"]
     # A newly supported publisher is not automatically an original creator.
     return 3.5

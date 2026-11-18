@@ -7,15 +7,25 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, HttpUrl, StrictBool, field_validator
 
 SourceCategory = Literal[
+    "Video Platforms",
+    "Award Archives",
+    "Creative Press",
+    "Brand Film Showcases",
+    "Studios & Agencies",
+    "Web & Interactive",
+    "Podcasts & Interviews",
+    "Social Platforms",
+]
+PreviousSourceCategory = Literal[
     "Video & Film",
     "Awards & Winning Work",
     "Creative Publications",
     "Brand & Corporate Films",
     "Studios & Production Companies",
     "Web & Interactive Design",
-    "Podcasts & Interviews",
     "Social & Visual Inspiration",
 ]
+StoredSourceCategory = SourceCategory | PreviousSourceCategory
 SourceGroup = Literal[
     "video", "awards", "editorial", "brand_films", "original_work", "interactive", "podcast", "social"
 ]
@@ -30,13 +40,13 @@ LegacySource = Literal[
 ]
 
 LEGACY_CATEGORY_MAP: dict[LegacySource, SourceCategory] = {
-    "Vimeo": "Video & Film",
-    "YouTube": "Video & Film",
-    "Instagram": "Social & Visual Inspiration",
-    "Pinterest": "Social & Visual Inspiration",
-    "Studio portfolios": "Studios & Production Companies",
-    "Production companies": "Studios & Production Companies",
-    "Award archives": "Awards & Winning Work",
+    "Vimeo": "Video Platforms",
+    "YouTube": "Video Platforms",
+    "Instagram": "Social Platforms",
+    "Pinterest": "Social Platforms",
+    "Studio portfolios": "Studios & Agencies",
+    "Production companies": "Studios & Agencies",
+    "Award archives": "Award Archives",
 }
 
 

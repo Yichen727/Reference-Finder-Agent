@@ -9,14 +9,87 @@ from pydantic import ValidationError
 
 from backend.main import create_app
 from backend.schemas.models import SOURCES, QueryStrand, SearchStrategy, StoredBrief
+from backend.schemas.source_registry import PreviousSourceCategory
 from backend.services import source_registry
 from backend.services.ranking import score_reference
 from backend.services.source_policy import SourcePolicy, publishing_platform
+from config import SOURCE_CATEGORY_RENAMES
 from tests.conftest import completed_run
 from tests.test_discovery import discovery_api as discovery_api
 from tests.test_discovery import execute, live_settings
 from tests.test_ranking import reference
 from tests.test_source_registry import EXPECTED_CATEGORIES
+
+
+@pytest.mark.parametrize("old,new", SOURCE_CATEGORY_RENAMES.items())
+def test_renamed_category_submissions_normalize_and_keep_scope(client, old, new):
+    brief = client.post("/briefs", json={"concept": "A film", "preferred_sources": [old, new]}).json()
+    assert brief["preferred_sources"] == [new]
+    archived_strategy = strategy([old], [old])
+    assert archived_strategy.preferred_sources == archived_strategy.source_priority == [old]
+    jobs = SourcePolicy().jobs(archived_strategy, 1)
+    assert jobs[0].categories == [new]
+    assert jobs[0].domains == EXPECTED_CATEGORIES[new][1]
+    with pytest.raises(ValidationError):
+        strategy([new], [old, new])
+
+
+def test_planning_schema_only_advertises_current_category_names():
+    from typing import get_args
+
+    from backend.schemas.models import StrategyDraft
+
+    assert set(get_args(PreviousSourceCategory)) == set(SOURCE_CATEGORY_RENAMES)
+    assert StrategyDraft.model_json_schema()["properties"]["source_priority"]["items"]["enum"] == SOURCES
+
+
+@pytest.mark.parametrize("old,new", SOURCE_CATEGORY_RENAMES.items())
+def test_saved_research_with_previous_category_names_reads_and_exports_without_rewriting(client, old, new):
+    run, _ = completed_run(client, count=4)
+    selected = [item["id"] for item in reversed(run["results"])]
+    client.put(
+        f"/search-runs/{run['id']}/selection", json={"ordered_ids": selected, "expected_version": 0}
+    ).raise_for_status()
+    repository = client.app.state.workflow.repository
+    stored = repository.get("run", run["id"])
+    brief = repository.get("brief", run["brief_id"])
+    brief["preferred_sources"] = [old]
+    stored["strategy"]["preferred_sources"] = stored["strategy"]["source_priority"] = [old]
+    stored["coverage"] = [{"category": old, "queries_attempted": 1, "references_returned": 4, "note": ""}]
+    for item in stored["results"]:
+        item["source_category"] = old
+    with repository.connection() as connection:
+        connection.execute(
+            "UPDATE records SET payload=? WHERE kind='run' AND id=?", (json.dumps(stored), run["id"])
+        )
+        connection.execute(
+            "UPDATE records SET payload=? WHERE kind='brief' AND id=?", (json.dumps(brief), run["brief_id"])
+        )
+    restored = client.get(f"/search-runs/{run['id']}")
+    assert restored.status_code == 200
+    assert restored.json()["strategy"]["source_priority"] == [old]
+    assert all(item["source_category"] == old for item in restored.json()["results"])
+    assert client.get(f"/briefs/{run['brief_id']}").json()["preferred_sources"] == [old]
+    assert restored.json()["selection"]["ordered_ids"] == selected
+    assert (
+        client.post(
+            f"/search-runs/{run['id']}/exports/pptx", json={"expected_selection_version": 1}
+        ).status_code
+        == 201
+    )
+    assert repository.get("run", run["id"]) == stored
+    assert repository.get("brief", run["brief_id"]) == brief
+
+
+@pytest.mark.parametrize("old,new", SOURCE_CATEGORY_RENAMES.items())
+def test_renaming_does_not_change_source_ratings(old, new):
+    from backend.services.ranking import source_rating
+
+    item = reference(url="https://studio.test/work/example")
+    item.platform, item.source_category = "studio.test", old
+    before = source_rating(item)
+    item.source_category = new
+    assert source_rating(item) == before
 
 
 def strategy(sources=None, priority=None):
@@ -72,7 +145,7 @@ def test_registry_metadata_and_search_do_not_read_or_require_seeds(
     settings.search_query_limit = 1
     with TestClient(create_app(live_settings(settings))) as client:
         assert len(client.get("/source-categories").json()) == 8
-        run = execute(client, sources=["Web & Interactive Design"], count=4)
+        run = execute(client, sources=["Web & Interactive"], count=4)
     assert run["results"] and set(read_names) == {"sources.json"}
 
 
@@ -85,19 +158,19 @@ def test_aliases_are_normalized_only_for_new_briefs_and_duplicates_are_collapsed
             "preferred_sources": [
                 "YouTube",
                 "Vimeo",
-                "Video & Film",
+                "Video Platforms",
                 "Studio portfolios",
                 "Production companies",
             ],
         },
     )
     assert response.status_code == 201
-    assert response.json()["preferred_sources"] == ["Video & Film", "Studios & Production Companies"]
+    assert response.json()["preferred_sources"] == ["Video Platforms", "Studios & Agencies"]
 
 
 def test_submitted_strategy_cannot_expand_the_briefs_selected_sources(client):
     brief = client.post("/briefs", json={"concept": "A film", "preferred_sources": ["YouTube"]}).json()
-    proposed = strategy(["Social & Visual Inspiration"]).model_dump()
+    proposed = strategy(["Social Platforms"]).model_dump()
     proposed["brief_id"] = brief["id"]
     response = client.post(
         "/search-runs", json={"brief_id": brief["id"], "strategy": proposed, "idempotency_key": str(uuid4())}
@@ -109,14 +182,14 @@ def test_submitted_strategy_cannot_expand_the_briefs_selected_sources(client):
 def test_all_groups_can_be_scheduled_and_priorities_never_expand_scope():
     policy = SourcePolicy()
     assert {job.categories[0] for job in policy.jobs(strategy(), 8)} == set(SOURCES)
-    preferred = ["Video & Film", "Podcasts & Interviews"]
+    preferred = ["Video Platforms", "Podcasts & Interviews"]
     jobs = policy.jobs(strategy(preferred, ["Podcasts & Interviews"]), 2)
     assert jobs[0].domains == ["gq.com", "gq-magazine.co.uk"]
-    assert jobs[1].categories == ["Video & Film"]
+    assert jobs[1].categories == ["Video Platforms"]
     with pytest.raises(ValidationError):
-        strategy(["Video & Film"], ["Podcasts & Interviews"])
+        strategy(["Video Platforms"], ["Podcasts & Interviews"])
     with pytest.raises(ValidationError):
-        strategy(preferred, ["Video & Film", "Video & Film"])
+        strategy(preferred, ["Video Platforms", "Video Platforms"])
     without_podcast = [category for category in SOURCES if category != "Podcasts & Interviews"]
     assert all(
         "Podcasts & Interviews" not in job.categories for job in policy.jobs(strategy(without_podcast), 8)
@@ -126,7 +199,7 @@ def test_all_groups_can_be_scheduled_and_priorities_never_expand_scope():
 @pytest.mark.parametrize(
     "prompt,first",
     [
-        ("An interactive website", "Web & Interactive Design"),
+        ("An interactive website", "Web & Interactive"),
         ("A podcast interview", "Podcasts & Interviews"),
     ],
 )
@@ -137,7 +210,7 @@ def test_legacy_strategies_get_relevant_local_fallback_without_an_extra_model_ca
 
 
 def test_existing_planning_call_provides_priority_within_the_same_search_budget(settings, discovery_api):
-    discovery_api["source_priority"] = ["Web & Interactive Design"]
+    discovery_api["source_priority"] = ["Web & Interactive"]
     with TestClient(create_app(live_settings(settings))) as client:
         run = execute(client, count=4)
     search_calls = [call for call in discovery_api["calls"] if "tools" in call]
@@ -146,7 +219,7 @@ def test_existing_planning_call_provides_priority_within_the_same_search_budget(
         "siteinspire.com",
         "webflow.com",
     ]
-    assert run["strategy"]["source_priority"] == ["Web & Interactive Design"]
+    assert run["strategy"]["source_priority"] == ["Web & Interactive"]
     assert run["usage"]["requests_attempted"] == 5
 
 
@@ -154,7 +227,7 @@ def test_out_of_scope_model_priority_is_rejected_before_search(settings, discove
     discovery_api["source_priority"] = ["Podcasts & Interviews"]
     with TestClient(create_app(live_settings(settings))) as client:
         brief = client.post(
-            "/briefs", json={"concept": "A film", "preferred_sources": ["Video & Film"]}
+            "/briefs", json={"concept": "A film", "preferred_sources": ["Video Platforms"]}
         ).json()
         response = client.post(f"/briefs/{brief['id']}/strategy")
     assert response.status_code == 502
@@ -163,21 +236,19 @@ def test_out_of_scope_model_priority_is_rejected_before_search(settings, discove
 
 def test_domain_attribution_rejects_relabelled_unselected_sources():
     policy = SourcePolicy()
-    studios = ["Studios & Production Companies"]
+    studios = ["Studios & Agencies"]
     assert policy.category("https://youtube.com/watch?v=abc", studios[0], studios) is None
     assert policy.category("https://thedrum.com/work/example", studios[0], studios) is None
     assert policy.category("https://studio.test/work/example", studios[0], studios) == studios[0]
-    assert (
-        policy.category("https://vimeo.com/1234", "Video & Film", SOURCES, ["Awards & Winning Work"]) is None
-    )
+    assert policy.category("https://vimeo.com/1234", "Video Platforms", SOURCES, ["Award Archives"]) is None
 
 
 def test_new_publisher_does_not_crash_ranking_or_upgrade_repost_authority():
     publisher = reference(url="https://thedrum.com/work/shared-futures")
-    publisher.platform, publisher.source_category = "thedrum.com", "Creative Publications"
+    publisher.platform, publisher.source_category = "thedrum.com", "Creative Press"
     assert score_reference(publisher, StoredBrief(concept="A warm film"), set(publisher.evidence_ids))
     assert publisher.ranking.components["source"] == 3.5
-    publisher.platform, publisher.source_category = "Pinterest", "Social & Visual Inspiration"
+    publisher.platform, publisher.source_category = "Pinterest", "Social Platforms"
     assert score_reference(publisher, StoredBrief(concept="A warm film"), set(publisher.evidence_ids))
     assert publisher.ranking.components["source"] == 2.5
 

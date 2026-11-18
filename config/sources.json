@@ -1,35 +1,35 @@
 {
-  "Video & Film": {
+  "Video Platforms": {
     "group": "video",
     "domains": ["youtube.com", "youtu.be", "vimeo.com"],
     "instruction": "Find identifiable individual films from original brands, creators, directors or production companies. Prefer original releases over reposts; exclude channel homepages and generic video lists.",
     "note": "Public indexing and private video access limit coverage. Preserve access hashes. Page and search evidence do not establish that a film has been watched."
   },
-  "Awards & Winning Work": {
+  "Award Archives": {
     "group": "awards",
     "domains": ["canneslions.com", "lovethework.com", "dandad.org", "theoneclub.org", "clios.com", "thefwa.com", "nativeadvertisinginstitute.com"],
     "instruction": "Find specific official award entries and trace each identifiable work to its original project source where possible. Award collections and curated articles are discovery starting points, not final references.",
     "note": "Award names, years and categories require work-specific evidence. Subscriptions and indexing may limit access; being listed in a discovery article does not verify an award."
   },
-  "Creative Publications": {
+  "Creative Press": {
     "group": "editorial",
     "domains": ["famouscampaigns.com", "thedrum.com", "creativereview.co.uk", "creativeboom.com"],
     "instruction": "Discover individual creative works and campaigns in editorial coverage, then prefer their original brand or creator project pages. Use roundup articles as leads rather than standalone references.",
     "note": "Editorial descriptions and credits must be attributed to the specific source. Paywalls, incomplete credits and secondary reporting may limit verification."
   },
-  "Brand & Corporate Films": {
+  "Brand Film Showcases": {
     "group": "brand_films",
     "domains": ["nowadays.tv", "herenow.film", "superside.com"],
     "instruction": "Find specific brand and corporate films with identifiable titles and source evidence. Follow relevant example articles to the original individual production rather than returning a collection.",
     "note": "Commercial example lists are discovery material, not independent validation of production quality, metrics, credits or reproduction rights."
   },
-  "Studios & Production Companies": {
+  "Studios & Agencies": {
     "group": "original_work",
     "domains": [],
     "instruction": "Search the wider web for individual project pages from studios, directors, agencies and production companies. Do not restrict discovery to a fixed studio list or return general portfolio homepages.",
     "note": "An empty domain list means open web discovery. Source identity and production credits remain provisional until supported by the original project page."
   },
-  "Web & Interactive Design": {
+  "Web & Interactive": {
     "group": "interactive",
     "domains": ["awwwards.com", "siteinspire.com", "webflow.com"],
     "instruction": "Find identifiable individual websites and interactive projects with original project or creator links. Exclude general galleries, template collections and inspiration homepages as final references.",
@@ -41,7 +41,7 @@
     "instruction": "When this optional category is selected and relevant to the brief, find individual podcast episodes or interviews. GQ is a preferred discovery source, not a mandatory source on every search. Prefer identifiable original episode pages.",
     "note": "This category is optional like all others. Episode or article evidence does not establish that audio was listened to or video watched; do not return generic show homepages."
   },
-  "Social & Visual Inspiration": {
+  "Social Platforms": {
     "group": "social",
     "domains": ["instagram.com", "pinterest.com", "pinterest.co.uk"],
     "instruction": "Find public indexed individual Reels, posts or Pins with clear work identity and attribution. Trace reposts to original creators where possible; exclude profiles and general inspiration boards.",

@@ -94,13 +94,13 @@ def discovery_api(monkeypatch):
             payload = json.loads(kwargs["input"])
             category = payload["source_categories"][0]
             domains = {
-                "Video & Film": "vimeo.com",
-                "Awards & Winning Work": "dandad.org",
-                "Creative Publications": "thedrum.com",
-                "Brand & Corporate Films": "nowadays.tv",
-                "Web & Interactive Design": "awwwards.com",
+                "Video Platforms": "vimeo.com",
+                "Award Archives": "dandad.org",
+                "Creative Press": "thedrum.com",
+                "Brand Film Showcases": "nowadays.tv",
+                "Web & Interactive": "awwwards.com",
                 "Podcasts & Interviews": "gq.com",
-                "Social & Visual Inspiration": "pinterest.com",
+                "Social Platforms": "pinterest.com",
                 "Vimeo": "vimeo.com",
                 "YouTube": "youtube.com",
                 "Instagram": "instagram.com",

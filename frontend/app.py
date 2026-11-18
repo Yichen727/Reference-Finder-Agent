@@ -4,6 +4,7 @@ from uuid import uuid4
 
 import streamlit as st
 
+from config import current_source_name
 from frontend import layout
 from frontend.api_client import APIClient, APIError
 from frontend.curation import EDIT_FIELDS, apply_pack_action, draft_from_run, selection_payload
@@ -303,7 +304,7 @@ def submit_pending():
 
 
 def source_categories():
-    if "source_categories" not in st.session_state:
+    if "source_categories" not in st.session_state or st.session_state.get("source_names_version") != 2:
         categories = client.request("GET", "/source-categories")
         if (
             not isinstance(categories, list)
@@ -319,6 +320,13 @@ def source_categories():
         ):
             raise APIError("The source category list is unavailable.")
         st.session_state["source_categories"] = categories
+        # Refresh old cached labels once, retaining explicit deselections and drafts.
+        for key in ("brief_sources", "research_source_choices"):
+            if key in st.session_state:
+                st.session_state[key] = list(
+                    dict.fromkeys(current_source_name(name) for name in st.session_state[key])
+                )
+        st.session_state["source_names_version"] = 2
     return st.session_state["source_categories"]
 
 

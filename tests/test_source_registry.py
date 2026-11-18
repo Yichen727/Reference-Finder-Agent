@@ -12,8 +12,8 @@ from backend.services.source_policy import SourcePolicy
 from backend.services.source_registry import load_legacy_sources, load_source_registry
 
 EXPECTED_CATEGORIES = {
-    "Video & Film": ("video", ["youtube.com", "youtu.be", "vimeo.com"]),
-    "Awards & Winning Work": (
+    "Video Platforms": ("video", ["youtube.com", "youtu.be", "vimeo.com"]),
+    "Award Archives": (
         "awards",
         [
             "canneslions.com",
@@ -25,15 +25,15 @@ EXPECTED_CATEGORIES = {
             "nativeadvertisinginstitute.com",
         ],
     ),
-    "Creative Publications": (
+    "Creative Press": (
         "editorial",
         ["famouscampaigns.com", "thedrum.com", "creativereview.co.uk", "creativeboom.com"],
     ),
-    "Brand & Corporate Films": ("brand_films", ["nowadays.tv", "herenow.film", "superside.com"]),
-    "Studios & Production Companies": ("original_work", []),
-    "Web & Interactive Design": ("interactive", ["awwwards.com", "siteinspire.com", "webflow.com"]),
+    "Brand Film Showcases": ("brand_films", ["nowadays.tv", "herenow.film", "superside.com"]),
+    "Studios & Agencies": ("original_work", []),
+    "Web & Interactive": ("interactive", ["awwwards.com", "siteinspire.com", "webflow.com"]),
     "Podcasts & Interviews": ("podcast", ["gq.com", "gq-magazine.co.uk"]),
-    "Social & Visual Inspiration": ("social", ["instagram.com", "pinterest.com", "pinterest.co.uk"]),
+    "Social Platforms": ("social", ["instagram.com", "pinterest.com", "pinterest.co.uk"]),
 }
 
 
@@ -62,7 +62,7 @@ def test_registry_matches_the_eight_category_contract_and_display_order():
         assert registry.categories[name].domains == domains
     metadata = registry.metadata()
     assert all(entry.default_selected for entry in metadata)
-    assert [entry.name for entry in metadata if entry.open_discovery] == ["Studios & Production Companies"]
+    assert [entry.name for entry in metadata if entry.open_discovery] == ["Studios & Agencies"]
 
 
 def test_legacy_contract_is_readable_and_active_policy_uses_eight_categories():
@@ -94,7 +94,9 @@ def test_category_metadata_is_ordered_read_only_and_new_search_contracts_are_ena
     assert client.get("/sources").json() == load_legacy_sources()
     assert client.get("/search-runs").json() == before
     assert (
-        client.post("/briefs", json={"concept": "A film", "preferred_sources": ["Video & Film"]}).status_code
+        client.post(
+            "/briefs", json={"concept": "A film", "preferred_sources": ["Video Platforms"]}
+        ).status_code
         == 201
     )
 
@@ -109,7 +111,7 @@ def test_missing_resources_have_a_clear_error(configuration, filename):
     assert caught.value.status == 503 and filename in caught.value.message
 
 
-@pytest.mark.parametrize("content", ['{"Video & Film": {}, "Video & Film": {}}', '{"broken"', "[]"])
+@pytest.mark.parametrize("content", ['{"Video Platforms": {}, "Video Platforms": {}}', '{"broken"', "[]"])
 def test_duplicate_keys_invalid_json_and_wrong_root_are_rejected(configuration, content):
     (configuration / "sources.json").write_text(content, encoding="utf-8")
     with pytest.raises(AppError, match="sources.json"):
@@ -122,17 +124,17 @@ def test_duplicate_keys_invalid_json_and_wrong_root_are_rejected(configuration, 
 def test_invalid_categories_and_groups_are_rejected(configuration, change):
     def edit(value):
         if change == "unknown":
-            value["Another Category"] = value.pop("Video & Film")
+            value["Another Category"] = value.pop("Video Platforms")
         elif change == "missing":
-            del value["Video & Film"]
+            del value["Video Platforms"]
         elif change == "group":
-            value["Video & Film"]["group"] = "not_registered"
+            value["Video Platforms"]["group"] = "not_registered"
         elif change == "duplicate_group":
-            value["Video & Film"]["group"] = "podcast"
+            value["Video Platforms"]["group"] = "podcast"
         elif change == "closed_original":
-            value["Studios & Production Companies"]["domains"] = ["example.com"]
+            value["Studios & Agencies"]["domains"] = ["example.com"]
         else:
-            value["Video & Film"]["domains"] = []
+            value["Video Platforms"]["domains"] = []
 
     change_configuration(configuration, "sources.json", edit)
     with pytest.raises(AppError, match="sources.json"):
@@ -155,7 +157,7 @@ def test_invalid_categories_and_groups_are_rejected(configuration, change):
 )
 def test_malformed_or_duplicate_domains_are_rejected(configuration, domains):
     change_configuration(
-        configuration, "sources.json", lambda value: value["Video & Film"].update(domains=domains)
+        configuration, "sources.json", lambda value: value["Video Platforms"].update(domains=domains)
     )
     with pytest.raises(AppError, match="domains"):
         load_source_registry(configuration)
@@ -170,7 +172,7 @@ def test_resources_resolve_without_the_repository_working_directory(tmp_path, mo
 def test_invalid_registry_metadata_returns_a_configuration_error_without_breaking_legacy_search(
     client, configuration, monkeypatch
 ):
-    change_configuration(configuration, "sources.json", lambda value: value.pop("Video & Film"))
+    change_configuration(configuration, "sources.json", lambda value: value.pop("Video Platforms"))
     monkeypatch.setattr(source_registry, "files", lambda package: configuration)
     response = client.get("/source-categories")
     assert response.status_code == 503

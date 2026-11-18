@@ -102,9 +102,9 @@ OpenAI calls or download new images.
 
 The default search requests 10 references; you can request up to 20. Some searches
 return fewer usable results. All eight source categories are selected by default:
-Video & Film, Awards & Winning Work, Creative Publications, Brand & Corporate Films,
-Studios & Production Companies, Web & Interactive Design, Podcasts & Interviews,
-and Social & Visual Inspiration. Deselect any category to narrow your search.
+Video Platforms, Award Archives, Creative Press, Brand Film Showcases,
+Studios & Agencies, Web & Interactive, Podcasts & Interviews,
+and Social Platforms. Deselect any category to narrow your search.
 Internal case studies are planned for a later phase.
 
 Use **New Research** in the sidebar to start again. Click a title under **Recent Research**

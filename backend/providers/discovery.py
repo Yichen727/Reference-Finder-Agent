@@ -196,7 +196,10 @@ class ExternalDiscovery:
             raise AppError("openai_not_configured", "Configure the OpenAI key and model settings first.", 503)
         budget = RequestBudget(self.settings)
         strategy = strategy.model_copy(
-            update={"preferred_sources": normalize_sources(strategy.preferred_sources)}
+            update={
+                "preferred_sources": normalize_sources(strategy.preferred_sources),
+                "source_priority": normalize_sources(strategy.source_priority),
+            }
         )
         outcome = SearchOutcome(
             coverage=[

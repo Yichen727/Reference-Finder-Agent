@@ -68,7 +68,10 @@ class Workflow:
         if not self.settings.search_configured:
             raise AppError("openai_not_configured", "Configure the OpenAI key and model settings first.", 503)
         strategy = request.strategy.model_copy(
-            update={"preferred_sources": normalize_sources(request.strategy.preferred_sources)}
+            update={
+                "preferred_sources": normalize_sources(request.strategy.preferred_sources),
+                "source_priority": normalize_sources(request.strategy.source_priority),
+            }
         )
         run = SearchRun(brief_id=brief.id, strategy=strategy, mode=self.settings.app_mode)
         payload = request.model_dump(exclude={"idempotency_key"}, mode="json")

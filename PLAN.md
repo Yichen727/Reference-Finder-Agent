@@ -547,7 +547,7 @@ Phase 4 已将两份 PPTX 模板及版本清单复制到 `backend/templates/` �
 | `backend/providers/discovery.py`、`prompts/search.txt`、`prompts/discovery.txt` | 域名过滤、证据收集、页面核验后整理候选 | 接入新类别与域名策略，保留原作链接与证据；不接入 seeds |
 | `backend/services/ranking.py` | 依据来源身份与证据评分，执行作品去重和多样性选择 | 合并来源后仍保留对转载、原作、官方奖项的区分；不通过新类别调整评分权重 |
 | `frontend/app.py` | SOURCES 再次硬编码 7 项；结果筛选使用已有 platform 值 | 新表单改用 8 类；已保存研究的筛选、控件状态和草稿不能因枚举替换失效 |
-| `backend/services/thumbnails.py`、`backend/services/pptx_export.py` | 官方视频封面解析按 URL 识别，部分预览分支及导出来源使用 platform | 保留真实 YouTube/Vimeo 等平台显示、社交预览限制和卡片缩略图导出，不能把“Video & Film”误当实际平台 |
+| `backend/services/thumbnails.py`、`backend/services/pptx_export.py` | 官方视频封面解析按 URL 识别，部分预览分支及导出来源使用 platform | 保留真实 YouTube/Vimeo 等平台显示、社交预览限制和卡片缩略图导出，不能把“Video Platforms”误当实际平台 |
 
 保留 Streamlit + FastAPI、现有模型配置、搜索与页面读取预算、进度展示和最多 20 条的结果/选择限制。Cards、Recent Research、筛选弹层、Your Pack 拖拽及 PPTX 模板与版式不重设计；不恢复 Mock，不新增无必要的依赖或 SQL 表结构迁移。现有证据、安全检查、归属与权利说明继续有效。
 
@@ -557,14 +557,14 @@ Phase 4 已将两份 PPTX 模板及版本清单复制到 `backend/templates/` �
 
 | Category | Group | Domains |
 | --- | --- | --- |
-| Video & Film | `video` | `youtube.com`, `youtu.be`, `vimeo.com` |
-| Awards & Winning Work | `awards` | `canneslions.com`, `lovethework.com`, `dandad.org`, `theoneclub.org`, `clios.com`, `thefwa.com`, `nativeadvertisinginstitute.com` |
-| Creative Publications | `editorial` | `famouscampaigns.com`, `thedrum.com`, `creativereview.co.uk`, `creativeboom.com` |
-| Brand & Corporate Films | `brand_films` | `nowadays.tv`, `herenow.film`, `superside.com` |
-| Studios & Production Companies | `original_work` | `[]`，开放发现工作室、导演、代理商及制作公司的具体项目页 |
-| Web & Interactive Design | `interactive` | `awwwards.com`, `siteinspire.com`, `webflow.com` |
+| Video Platforms | `video` | `youtube.com`, `youtu.be`, `vimeo.com` |
+| Award Archives | `awards` | `canneslions.com`, `lovethework.com`, `dandad.org`, `theoneclub.org`, `clios.com`, `thefwa.com`, `nativeadvertisinginstitute.com` |
+| Creative Press | `editorial` | `famouscampaigns.com`, `thedrum.com`, `creativereview.co.uk`, `creativeboom.com` |
+| Brand Film Showcases | `brand_films` | `nowadays.tv`, `herenow.film`, `superside.com` |
+| Studios & Agencies | `original_work` | `[]`，开放发现工作室、导演、代理商及制作公司的具体项目页 |
+| Web & Interactive | `interactive` | `awwwards.com`, `siteinspire.com`, `webflow.com` |
 | Podcasts & Interviews | `podcast` | `gq.com`, `gq-magazine.co.uk` |
-| Social & Visual Inspiration | `social` | `instagram.com`, `pinterest.com`, `pinterest.co.uk` |
+| Social Platforms | `social` | `instagram.com`, `pinterest.com`, `pinterest.co.uk` |
 
 配置仍保留 `instruction` 与 `note`：描述适合的作品、原作优先和访问限制。Podcasts & Interviews 中 GQ 为优先发现来源，不是每次查询的必搜项；未选该类别时，不安排其独立搜索或精选入口任务。
 
@@ -572,10 +572,10 @@ Phase 4 已将两份 PPTX 模板及版本清单复制到 `backend/templates/` �
 
 | 历史值 | 新搜索类别 |
 | --- | --- |
-| Vimeo、YouTube | Video & Film |
-| Instagram、Pinterest | Social & Visual Inspiration |
-| Studio portfolios、Production companies | Studios & Production Companies |
-| Award archives | Awards & Winning Work |
+| Vimeo、YouTube | Video Platforms |
+| Instagram、Pinterest | Social Platforms |
+| Studio portfolios、Production companies | Studios & Agencies |
+| Award archives | Award Archives |
 
 映射用于新搜索请求边界及必要的显示适配，不批量重写历史 Brief、Strategy、结果或 coverage。旧条目的实际 platform、reference ID、source_url、证据 ID、选择版本和保存顺序保持原样。
 
@@ -583,34 +583,34 @@ Phase 4 已将两份 PPTX 模板及版本清单复制到 `backend/templates/` �
 
 原配置阶段已生成 `config/curated_seeds.json`，仅作为暂存草稿保留，不在本次迁移中启用。以下 URL 和规则是未来可选方案，不要求实现、抓取或通过其验收；文件内的 `enabled=true` 不能自动开启功能。当前注册表与搜索均不读取此文件，强制加载依赖已在 Phase 2 解除。内容为监督者推荐的发现线索，不是已核实的最终作品，也不赋予作品、奖项或图片额外可信度/使用权。
 
-**Awards & Winning Work — 4 个入口**
+**Award Archives — 4 个入口**
 
 - https://www.canneslions.com/awards/winners-spotlight
 - https://www.outbrain.com/blog/best-cannes-lions-winners/
 - https://www.thedrum.com/news/cannes-lions-winners-down-the-years-10-the-most-memorable-ads
 - https://www.nativeadvertisinginstitute.com/blog/record-breaking-year-winners-branded-content-awards-2026-celebrated-london
 
-**Creative Publications — 2 个入口**
+**Creative Press — 2 个入口**
 
 - https://www.thedrum.com/industry-insight/8-inspiring-content-marketing-campaigns-and-what-you-can-learn-from-them
 - https://johnkovacevich.medium.com/78-creative-campaigns-that-caught-our-eye-in-the-second-half-of-2023-ac082ba940ef
 
-**Brand & Corporate Films — 4 个入口**
+**Brand Film Showcases — 4 个入口**
 
 - https://shorthand.com/the-craft/content-marketing-examples/index.html
 - https://nowadays.tv/news-feed/the-best-of-the-best-of-corporate-films-according-to-us
 - https://www.herenow.film/trimtab/best-corporate-video-examples
 - https://www.superside.com/blog/brand-video-examples
 
-**Web & Interactive Design — 1 个入口**
+**Web & Interactive — 1 个入口**
 
 - https://www.creativeboom.com/tips/50-of-the-best-websites-for-daily-inspiration/
 
-**Studios & Production Companies — 1 个入口**
+**Studios & Agencies — 1 个入口**
 
 - https://www.ogilvy.com/ideas/ogilvy-tops-drums-2026-world-creative-rankings
 
-Video & Film、Podcasts & Interviews、Social & Visual Inspiration 暂无指定 seed，空列表是有效配置，仍可使用正常域名搜索。12 个入口按 Brief 的相关性及剩余预算择用，不能每次全部抓取。
+Video Platforms、Podcasts & Interviews、Social Platforms 暂无指定 seed，空列表是有效配置，仍可使用正常域名搜索。12 个入口按 Brief 的相关性及剩余预算择用，不能每次全部抓取。
 
 部分 seed 域名不在所属类别的 domains 中，例如 Outbrain、Medium、Shorthand、Ogilvy；The Drum 与 Creative Boom 的文章也可能服务其他研究类别。处理方式是把**明确登记的具体 seed URL**作为该类别的发现入口，不把整个域名自动加入所有搜索，也不根据域名把 seed 改到另一类别。普通类别搜索继续遵守其 domains；入口正文与其中链接都要通过原有安全和来源核验。
 
@@ -654,7 +654,7 @@ Video & Film、Podcasts & Interviews、Social & Visual Inspiration 暂无指定 
 1. **新请求与历史读取分开：** 新搜索统一使用 8 类，输入兼容旧 7 类别名并去重；Brief、Strategy、coverage 的相关上限由 7 调整到 8。持久化对象继续识别旧值，不能只替换 Literal 导致历史研究返回校验错误。新请求拒绝未知类别、空选择或越过用户所选范围的策略。
 2. **区分类别与平台：** 引入兼容旧 JSON 的可选 `source_category` 字段，新结果填入规范类别，旧记录缺省为 None 并保留原 platform，必要分类时才使用旧映射；`platform` 改为有长度限制、由可信来源 URL 推导的发布平台/域名。保留候选结构中 platform 字段的类别含义以兼容原输出，最终结果的平台值由后端核对，不能由模型自行编造；coverage 与选择范围使用 category，卡片和 PPTX 仍显示真实 YouTube/Vimeo 等。仅增添带默认值的 JSON 字段，不新建 SQL 迁移或重写历史 payload。
 3. **沿用一次策略生成：** 现有策略调用增加 `source_priority`，只从所选 8 类中给出 Brief 相关的顺序；理由沿用已有 summary/strands，不另增一套解释结构。新增字段默认空列表兼容旧策略；后端检查重复与越界，并补齐所选类别的可调度集合。旧策略无优先信息时，按现有 Brief 文本和确定性顺序回退，不丢失新 group，不额外调用 OpenAI 做分类。
-4. **按需安排任务：** 用相关性和现有请求/时间预算选择 category × strand 组合，替换固定四组轮转。短片 Brief 可先查 Video & Film 与原作，互动项目可先查 Web & Interactive Design，访谈 Brief 可先查 Podcasts & Interviews。所有默认选中不等于八类每次都必须调用；选中 GQ 所在类别也不代表必查 GQ。开放 original_work 任务单独构造，不把其他限定域名任务意外放宽成全网搜索。
+4. **按需安排任务：** 用相关性和现有请求/时间预算选择 category × strand 组合，替换固定四组轮转。短片 Brief 可先查 Video Platforms 与原作，互动项目可先查 Web & Interactive，访谈 Brief 可先查 Podcasts & Interviews。所有默认选中不等于八类每次都必须调用；选中 GQ 所在类别也不代表必查 GQ。开放 original_work 任务单独构造，不把其他限定域名任务意外放宽成全网搜索。
 5. **独立于 seeds：** 只使用所选类别的正常域名搜索或 original_work 开放发现；不实现 seed 筛选、抓取、文章拆解、专用预算或证据扩展流程，不因为 seed 文件不可用而中断搜索。
 6. **保留来源范围与原作追溯：** 未选类别不作为独立搜索任务。沿用现有作品与原作证据处理，仅做新分类兼容所必需的适配；保留发现类别、原作 URL 和证据，不能因实际发布平台不同而丢失已选类别的合格作品。此次不额外建设新的跨站发现系统。
 7. **核验与去重保持证据标准：** 核对具体作品身份、署名和原始来源；播客以具体一期为单位，互动设计以具体网站/项目为单位。优先保留原作者或官方作品页，原作受限时保留原有核验限制。沿用 URL、视频 ID、嵌入信息、标题/制作方去重及 alternate_urls，不让同一作品占多个名额；聚合文章不直接当作作品。

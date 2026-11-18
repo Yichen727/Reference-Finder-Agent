@@ -134,7 +134,14 @@ class SourcePolicy:
         )
         ordered = list(
             dict.fromkeys(
-                [*(category for category in strategy.source_priority if category in selected), *fallback]
+                [
+                    *(
+                        category
+                        for category in normalize_sources(strategy.source_priority)
+                        if category in selected
+                    ),
+                    *fallback,
+                ]
             )
         )
         jobs = []
@@ -172,6 +179,6 @@ class SourcePolicy:
                 return category if category in allowed else None
         # Open-web categories are provisional: do not relabel a known platform as a studio.
         category = normalize_sources([suggested])[0]
-        if category == "Studios & Production Companies" and category in allowed and canonical_url(url):
+        if category == "Studios & Agencies" and category in allowed and canonical_url(url):
             return category
         return None

@@ -5,16 +5,22 @@ from uuid import uuid4
 from pydantic import BaseModel, ConfigDict, Field, HttpUrl, field_validator, model_validator
 
 from backend.core.limits import MAX_REFERENCES
-from backend.schemas.source_registry import LEGACY_CATEGORY_MAP, LegacySource, SourceCategory
+from backend.schemas.source_registry import (
+    LEGACY_CATEGORY_MAP,
+    LegacySource,
+    SourceCategory,
+    StoredSourceCategory,
+)
+from config import current_source_name
 
 Text = Annotated[str, Field(max_length=6000)]
-Source = SourceCategory | LegacySource
+Source = StoredSourceCategory | LegacySource
 SOURCES: list[SourceCategory] = list(get_args(SourceCategory))
 
 
 def normalize_sources(values):
     """Normalize new requests/execution only; historical stored objects retain their labels."""
-    return list(dict.fromkeys(LEGACY_CATEGORY_MAP.get(value, value) for value in values))
+    return list(dict.fromkeys(current_source_name(LEGACY_CATEGORY_MAP.get(value, value)) for value in values))
 
 
 def new_id() -> str:
@@ -71,14 +77,16 @@ class StrategyDraft(Model):
 class SearchStrategy(StrategyDraft):
     brief_id: str
     preferred_sources: list[Source] = Field(min_length=1, max_length=8)
+    source_priority: list[StoredSourceCategory] = Field(default_factory=list, max_length=8)
     # Retained to read archived records and preserve the existing API shape.
     is_mock: bool = False
 
     @model_validator(mode="after")
     def selected_source_priority(self):
-        if len(self.source_priority) != len(set(self.source_priority)) or not set(
-            self.source_priority
-        ) <= set(normalize_sources(self.preferred_sources)):
+        priorities = normalize_sources(self.source_priority)
+        if len(self.source_priority) != len(priorities) or not set(priorities) <= set(
+            normalize_sources(self.preferred_sources)
+        ):
             raise ValueError("Source priorities must be unique and selected in this strategy")
         return self
 
@@ -150,7 +158,7 @@ class ReferenceItem(Model):
     creator: Text = ""
     source_type: Literal["external", "internal"] = "external"
     platform: str = Field(min_length=1, max_length=120)
-    source_category: SourceCategory | None = None
+    source_category: StoredSourceCategory | None = None
     source_url: HttpUrl
     tags: list[Text] = Field(max_length=20)
     strand: Text

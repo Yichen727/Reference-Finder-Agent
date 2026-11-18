@@ -223,9 +223,31 @@ def test_source_categories_come_from_backend_with_all_eight_selected_and_are_cac
     assert sum(path == "/source-categories" for _, path, _ in bridge["requests"]) == 1
 
 
+@pytest.mark.parametrize("choices", [["Video & Film", "Studios & Production Companies"], []])
+def test_old_source_cache_refreshes_once_without_losing_draft_preferences(bridge, choices):
+    from config import current_source_name
+
+    app = open_app()
+    widget(app.multiselect, "brief_sources").set_value([])
+    area(app, "Describe your creative idea").input("Keep my unfinished film brief")
+    button(app, "Find References").click().run()
+    # Simulate an existing Streamlit session when the source labels are upgraded.
+    app.session_state["source_names_version"] = 1
+    app.session_state["research_source_choices"] = choices
+    app.session_state["brief_sources"] = choices
+    app.run()
+    assert not app.exception
+    assert widget(app.multiselect, "brief_sources").options == list(load_source_registry().categories)
+    assert widget(app.multiselect, "brief_sources").value == [current_source_name(name) for name in choices]
+    assert area(app, "Describe your creative idea").value == "Keep my unfinished film brief"
+    assert sum(path == "/source-categories" for _, path, _ in bridge["requests"]) == 2
+    app.run()
+    assert sum(path == "/source-categories" for _, path, _ in bridge["requests"]) == 2
+
+
 def test_source_deselections_survive_reruns_submission_and_research_navigation(bridge):
     app = open_app()
-    chosen = ["Video & Film", "Studios & Production Companies"]
+    chosen = ["Video Platforms", "Studios & Agencies"]
     widget(app.multiselect, "brief_sources").set_value(chosen)
     button(app, "Find References").click().run()  # Commit the form through validation, without searching.
     app.run()
