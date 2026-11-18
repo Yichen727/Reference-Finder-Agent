@@ -101,11 +101,6 @@ def discovery_api(monkeypatch):
                 "Web & Interactive": "awwwards.com",
                 "Podcasts & Interviews": "gq.com",
                 "Social Platforms": "pinterest.com",
-                "Vimeo": "vimeo.com",
-                "YouTube": "youtube.com",
-                "Instagram": "instagram.com",
-                "Pinterest": "pinterest.com",
-                "Award archives": "dandad.org",
             }
             url = f"https://{domains.get(category, 'studio.test')}/work/shared-futures-{index}"
             title = f"Shared Futures {index}"
@@ -348,7 +343,7 @@ def test_domain_preferences_and_budget_are_enforced(settings, discovery_api):
     settings = live_settings(settings)
     settings.search_max_requests = 3
     with TestClient(create_app(settings)) as client:
-        run = execute(client, sources=["YouTube"])
+        run = execute(client, sources=["Video Platforms"])
     assert run["status"] == "partial"
     assert 0 < len(run["results"]) < 3
     assert run["usage"]["requests_attempted"] <= 3

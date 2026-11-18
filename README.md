@@ -139,11 +139,11 @@ Research is stored locally in `data/reference_finder.sqlite3`, and exports in `d
 API documentation: **http://127.0.0.1:8000/docs** while the app is running.
 The frontend reads its eight categories from `GET /source-categories`, backed by
 `config/sources.json`, and retains source choices across submitted forms and navigation.
-The compatibility `GET /sources` endpoint retains the seven legacy labels; old API
-submissions map them to the corresponding merged categories.
-Historical research keeps its original labels and platform filters. Search priorities reuse the existing
-planning call, and result platforms still identify the actual publishing site.
-Curated Seeds are deferred: the registry and search never load or require
-`config/curated_seeds.json`. Its existing content is an unused draft.
+The former seven-source contract and `GET /sources` endpoint have been removed.
+API submissions must use the eight source categories, not platform names such as Vimeo or YouTube.
+Research saved under the former seven-source contract is no longer supported.
+Search priorities reuse the existing planning call, and result platforms still identify
+the actual publishing site. Curated Seeds are not implemented; their unused draft
+configuration and schema have been removed.
 Project scope and roadmap: [PLAN.md](PLAN.md) (Chinese).
 PPTX templates, image permissions, and acceptance checks: [PPTX export guide](docs/PPTX_EXPORT.md).

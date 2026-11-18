@@ -114,7 +114,7 @@ def test_unsafe_restricted_or_invalid_images_become_cached_placeholders(preview_
 def test_og_image_requires_specific_permission(preview_environment, permission):
     service, item, state = preview_environment
     item.source_url = "https://studio.test/work/futures"
-    item.platform = "Studio portfolios"
+    item.platform = "studio.test"
     state["html"] = '<meta property="og:image" content="https://studio.test/cover.png">'
     if permission == "configured":
         service.settings.preview_approved_domains = ["studio.test"]

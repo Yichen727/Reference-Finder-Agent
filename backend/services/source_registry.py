@@ -1,4 +1,4 @@
-"""Load source configuration without network calls or a curated-seed dependency."""
+"""Load and validate the eight-category source configuration without network calls."""
 
 import json
 from dataclasses import dataclass
@@ -10,7 +10,6 @@ from pydantic import TypeAdapter, ValidationError
 
 from backend.core.errors import AppError
 from backend.schemas.source_registry import (
-    LegacySource,
     SourceCategory,
     SourceCategoryMetadata,
     SourceDefinition,
@@ -87,14 +86,3 @@ def load_source_registry(directory: Path | None = None) -> SourceRegistry:
             "sources.json", "Only original_work uses an empty domain list for open discovery"
         )
     return SourceRegistry(categories)
-
-
-def load_legacy_sources(directory: Path | None = None) -> dict:
-    """Keep the existing seven-category search intact until the backend migration."""
-    definitions = validate_configuration(
-        "legacy_sources.json",
-        read_configuration("legacy_sources.json", directory),
-        dict[LegacySource, SourceDefinition],
-        get_args(LegacySource),
-    )
-    return {name: definition.model_dump() for name, definition in definitions.items()}

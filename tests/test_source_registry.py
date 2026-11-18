@@ -6,10 +6,10 @@ import pytest
 
 from backend.core.errors import AppError
 from backend.schemas.models import SOURCES, ReferenceBrief
-from backend.schemas.source_registry import LEGACY_CATEGORY_MAP, LegacySource, SourceCategory, SourceGroup
+from backend.schemas.source_registry import SourceCategory, SourceGroup
 from backend.services import source_registry
 from backend.services.source_policy import SourcePolicy
-from backend.services.source_registry import load_legacy_sources, load_source_registry
+from backend.services.source_registry import load_source_registry
 
 EXPECTED_CATEGORIES = {
     "Video Platforms": ("video", ["youtube.com", "youtu.be", "vimeo.com"]),
@@ -39,10 +39,9 @@ EXPECTED_CATEGORIES = {
 
 @pytest.fixture
 def configuration(tmp_path):
-    for filename in ["sources.json", "legacy_sources.json"]:
-        (tmp_path / filename).write_text(
-            files("config").joinpath(filename).read_text(encoding="utf-8"), encoding="utf-8"
-        )
+    (tmp_path / "sources.json").write_text(
+        files("config").joinpath("sources.json").read_text(encoding="utf-8"), encoding="utf-8"
+    )
     return tmp_path
 
 
@@ -65,15 +64,27 @@ def test_registry_matches_the_eight_category_contract_and_display_order():
     assert [entry.name for entry in metadata if entry.open_discovery] == ["Studios & Agencies"]
 
 
-def test_legacy_contract_is_readable_and_active_policy_uses_eight_categories():
-    legacy = load_legacy_sources()
-    assert list(legacy) == list(get_args(LegacySource))
-    assert set(LEGACY_CATEGORY_MAP) == set(get_args(LegacySource)) == set(legacy)
-    assert set(LEGACY_CATEGORY_MAP.values()) <= set(get_args(SourceCategory))
+def test_active_policy_and_default_brief_use_eight_categories():
     assert list(SourcePolicy().sources) == SOURCES
-    assert legacy["Vimeo"]["domains"] == ["vimeo.com"]
-    assert legacy["Studio portfolios"]["domains"] == []
     assert ReferenceBrief(concept="A film about collaboration").preferred_sources == SOURCES
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "Vimeo",
+        "YouTube",
+        "Instagram",
+        "Pinterest",
+        "Studio portfolios",
+        "Production companies",
+        "Award archives",
+    ],
+)
+def test_former_seven_source_labels_are_rejected_as_search_categories(client, name):
+    response = client.post("/briefs", json={"concept": "A film", "preferred_sources": [name]})
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == "validation_error"
 
 
 def test_category_metadata_is_ordered_read_only_and_new_search_contracts_are_enabled(client, monkeypatch):
@@ -91,7 +102,8 @@ def test_category_metadata_is_ordered_read_only_and_new_search_contracts_are_ena
         for entry in response.json()
     )
     assert client.post("/source-categories", json={}).status_code == 405
-    assert client.get("/sources").json() == load_legacy_sources()
+    assert client.get("/sources").status_code == 404
+    assert "/sources" not in client.get("/openapi.json").json()["paths"]
     assert client.get("/search-runs").json() == before
     assert (
         client.post(
@@ -101,12 +113,11 @@ def test_category_metadata_is_ordered_read_only_and_new_search_contracts_are_ena
     )
 
 
-@pytest.mark.parametrize("filename", ["sources.json", "legacy_sources.json"])
-def test_missing_resources_have_a_clear_error(configuration, filename):
+def test_missing_source_configuration_has_a_clear_error(configuration):
+    filename = "sources.json"
     (configuration / filename).unlink()
-    loader = load_legacy_sources if filename == "legacy_sources.json" else load_source_registry
     with pytest.raises(AppError) as caught:
-        loader(configuration)
+        load_source_registry(configuration)
     assert caught.value.code == "source_configuration_invalid"
     assert caught.value.status == 503 and filename in caught.value.message
 
@@ -166,10 +177,9 @@ def test_malformed_or_duplicate_domains_are_rejected(configuration, domains):
 def test_resources_resolve_without_the_repository_working_directory(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     assert len(load_source_registry().categories) == 8
-    assert len(load_legacy_sources()) == 7
 
 
-def test_invalid_registry_metadata_returns_a_configuration_error_without_breaking_legacy_search(
+def test_invalid_registry_metadata_returns_a_configuration_error_without_breaking_health(
     client, configuration, monkeypatch
 ):
     change_configuration(configuration, "sources.json", lambda value: value.pop("Video Platforms"))
@@ -177,4 +187,4 @@ def test_invalid_registry_metadata_returns_a_configuration_error_without_breakin
     response = client.get("/source-categories")
     assert response.status_code == 503
     assert response.json()["error"]["code"] == "source_configuration_invalid"
-    assert client.get("/sources").status_code == 200
+    assert client.get("/health").status_code == 200

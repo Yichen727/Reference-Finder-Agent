@@ -1,8 +1,10 @@
 # Atomized Reference Finder — MVP 实施计划
 
-更新日期：2026-11-17
+更新日期：2026-11-18
 当前进度：Phase 1–4 已实现；Streamlit 已支持真实外部搜索、双列视觉卡片、历史研究、拖拽参考包、只读分析及模板化 PPTX 导出。Mock 运行模式与示例数据未加入应用。
-来源迁移进度：第 12 节 **Source Architecture Migration — 8 Categories** 的 Migration Phase 1–3 已完成，前端从后端注册表读取 8 类 Sources、默认全选并保留已提交的来源偏好；后端支持新旧类别兼容、受控调度和真实平台标识。Curated Seeds 不被注册表或搜索读取，继续暂缓。Phase 4 保留为集中验收；内部案例 Phase 5 继续独立暂缓。
+来源迁移进度：第 12 节 **Source Architecture Migration — 8 Categories** 的 Migration Phase 1–3 已完成，前端从后端注册表读取 8 类 Sources、默认全选并保留已提交的来源偏好；后端支持受控调度和真实平台标识。Phase 4 保留为集中验收；内部案例 Phase 5 继续独立暂缓。
+
+**最新清理范围：不再支持原先 7 类来源的历史契约。** 已移除旧来源枚举与映射、旧配置及 `GET /sources` 接口，并删除未启用的 Curated Seeds 草稿配置和校验原型。当前搜索只加载 `config/sources.json` 的 8 类 Sources；真实 Vimeo、YouTube 等平台识别与现有检索预算、评分、PPTX 导出保持不变。8 类来源改名前后的显示名称适配仍保留。不会清空或迁移用户数据库；使用原 7 类契约的旧研究不再保证可读取。下文的分阶段历史记录若与本段冲突，以本段为准。
 Phase 4 已完成：每条 reference 使用 Single 模板生成一张可编辑 Slide，插入 Base 模板原第 2、3 页之间。4 条参考 / 7 页示例已通过 PowerPoint 实际打开、图片及文字边界检查；历史 DOCX 接口和文件下载保留兼容。
 最新调整：按用户要求将结果与参考包上限提升至 20，默认请求仍为 10；搜索与界面验证使用 4 个参考。新增原生五阶段进度，按真实流程推进，以已完成阶段数表示进展，不估算剩余时间；失败时清除进度，并沿用原提交键恢复搜索。
 语言约定：本计划保留中文；代码、界面、提示模板、README 和导出文档统一使用英文。
@@ -155,7 +157,7 @@ Web Search 支持来源信息和域名过滤，可用于受控的多来源查询
 
 ### 5.1 来源覆盖策略
 
-下表记录当前搜索使用的 7 个来源（已转存 `config/legacy_sources.json`）。第 12 节的 8 类注册表已建立；后续阶段再切换新搜索与界面，现阶段原有搜索行为和历史记录继续兼容。
+下表为迁移前 7 个来源的历史记录，仅供理解早期设计。当前搜索已使用第 12 节的 8 类注册表，旧配置与旧契约兼容层已移除。
 
 | 来源类别 | MVP 检索方式 | 限制与处理 |
 | --- | --- | --- |
@@ -243,7 +245,6 @@ Web Search 支持来源信息和域名过滤，可用于受控的多来源查询
 | 方法 | 路径 | 用途 |
 | --- | --- | --- |
 | GET | `/health` | 服务、运行模式和配置是否就绪；不返回密钥 |
-| GET | `/sources` | 当前搜索使用的 7 类兼容配置；Migration Phase 1 保持响应结构不变 |
 | GET | `/source-categories` | 8 类元数据，按显示顺序返回；前端 Sources 已接入，默认全部选中 |
 | POST | `/briefs` | 校验并保存 Brief |
 | POST | `/briefs/{brief_id}/strategy` | 生成可编辑的外部搜索策略 |
@@ -568,53 +569,11 @@ Phase 4 已将两份 PPTX 模板及版本清单复制到 `backend/templates/` �
 
 配置仍保留 `instruction` 与 `note`：描述适合的作品、原作优先和访问限制。Podcasts & Interviews 中 GQ 为优先发现来源，不是每次查询的必搜项；未选该类别时，不安排其独立搜索或精选入口任务。
 
-旧类别到新类别的兼容映射：
+原 7 类来源的兼容映射已移除，平台名称不再作为搜索类别提交。新研究使用上表中的 8 类 Sources，结果中的 `platform` 仍按真实发布网站识别。保留的是这 8 类来源改名前后的显示名称适配，不再支持迁移前的 7 类历史契约。
 
-| 历史值 | 新搜索类别 |
-| --- | --- |
-| Vimeo、YouTube | Video Platforms |
-| Instagram、Pinterest | Social Platforms |
-| Studio portfolios、Production companies | Studios & Agencies |
-| Award archives | Award Archives |
+### 12.3 Curated Discovery Seeds — 暂缓，草稿代码已清理
 
-映射用于新搜索请求边界及必要的显示适配，不批量重写历史 Brief、Strategy、结果或 coverage。旧条目的实际 platform、reference ID、source_url、证据 ID、选择版本和保存顺序保持原样。
-
-### 12.3 Curated Discovery Seeds — 暂缓，不属于本次迁移
-
-原配置阶段已生成 `config/curated_seeds.json`，仅作为暂存草稿保留，不在本次迁移中启用。以下 URL 和规则是未来可选方案，不要求实现、抓取或通过其验收；文件内的 `enabled=true` 不能自动开启功能。当前注册表与搜索均不读取此文件，强制加载依赖已在 Phase 2 解除。内容为监督者推荐的发现线索，不是已核实的最终作品，也不赋予作品、奖项或图片额外可信度/使用权。
-
-**Award Archives — 4 个入口**
-
-- https://www.canneslions.com/awards/winners-spotlight
-- https://www.outbrain.com/blog/best-cannes-lions-winners/
-- https://www.thedrum.com/news/cannes-lions-winners-down-the-years-10-the-most-memorable-ads
-- https://www.nativeadvertisinginstitute.com/blog/record-breaking-year-winners-branded-content-awards-2026-celebrated-london
-
-**Creative Press — 2 个入口**
-
-- https://www.thedrum.com/industry-insight/8-inspiring-content-marketing-campaigns-and-what-you-can-learn-from-them
-- https://johnkovacevich.medium.com/78-creative-campaigns-that-caught-our-eye-in-the-second-half-of-2023-ac082ba940ef
-
-**Brand Film Showcases — 4 个入口**
-
-- https://shorthand.com/the-craft/content-marketing-examples/index.html
-- https://nowadays.tv/news-feed/the-best-of-the-best-of-corporate-films-according-to-us
-- https://www.herenow.film/trimtab/best-corporate-video-examples
-- https://www.superside.com/blog/brand-video-examples
-
-**Web & Interactive — 1 个入口**
-
-- https://www.creativeboom.com/tips/50-of-the-best-websites-for-daily-inspiration/
-
-**Studios & Agencies — 1 个入口**
-
-- https://www.ogilvy.com/ideas/ogilvy-tops-drums-2026-world-creative-rankings
-
-Video Platforms、Podcasts & Interviews、Social Platforms 暂无指定 seed，空列表是有效配置，仍可使用正常域名搜索。12 个入口按 Brief 的相关性及剩余预算择用，不能每次全部抓取。
-
-部分 seed 域名不在所属类别的 domains 中，例如 Outbrain、Medium、Shorthand、Ogilvy；The Drum 与 Creative Boom 的文章也可能服务其他研究类别。处理方式是把**明确登记的具体 seed URL**作为该类别的发现入口，不把整个域名自动加入所有搜索，也不根据域名把 seed 改到另一类别。普通类别搜索继续遵守其 domains；入口正文与其中链接都要通过原有安全和来源核验。
-
-精选文章、获奖聚合页、首页或灵感列表只提供线索。最终结果必须识别到一件具体作品、案例、网站或一期访谈/播客，优先采用经核验的创作者、品牌、项目或官方单项奖项页面。无法定位独立作品或证据不足时，不用整篇合集凑数；不得凭列表标题推断具体奖项、署名、年份或制作技法。
+Curated Seeds 未进入运行流程，其草稿配置和校验原型现已删除。当前 8 类 Sources 直接按各自 domains、instruction、note 检索；不依赖精选入口、seed 抓取或单独的 seed 请求预算。如以后需要，另行安排设计与实施。
 
 ### 12.4 Migration Phase 1 — Configuration
 

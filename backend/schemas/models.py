@@ -5,22 +5,17 @@ from uuid import uuid4
 from pydantic import BaseModel, ConfigDict, Field, HttpUrl, field_validator, model_validator
 
 from backend.core.limits import MAX_REFERENCES
-from backend.schemas.source_registry import (
-    LEGACY_CATEGORY_MAP,
-    LegacySource,
-    SourceCategory,
-    StoredSourceCategory,
-)
+from backend.schemas.source_registry import SourceCategory, StoredSourceCategory
 from config import current_source_name
 
 Text = Annotated[str, Field(max_length=6000)]
-Source = StoredSourceCategory | LegacySource
+Source = StoredSourceCategory
 SOURCES: list[SourceCategory] = list(get_args(SourceCategory))
 
 
 def normalize_sources(values):
     """Normalize new requests/execution only; historical stored objects retain their labels."""
-    return list(dict.fromkeys(current_source_name(LEGACY_CATEGORY_MAP.get(value, value)) for value in values))
+    return list(dict.fromkeys(current_source_name(value) for value in values))
 
 
 def new_id() -> str:

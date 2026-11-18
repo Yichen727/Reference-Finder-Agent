@@ -12,9 +12,6 @@ from config import current_source_name
 NOISE = {"official", "film", "video", "case", "study", "watch", "vimeo", "youtube", "www", "com"}
 WEIGHTS = {"relevance": 30, "specificity": 25, "craft": 15, "source": 20, "feasibility": 10}
 SOURCE_RATINGS = {
-    "Studio portfolios": 5.0,
-    "Production companies": 5.0,
-    "Award archives": 4.5,
     "Vimeo": 4.0,
     "YouTube": 4.0,
     "Instagram": 3.0,
@@ -112,7 +109,7 @@ def representative_priority(item: ReferenceItem):
 
 
 def original_source(item: ReferenceItem) -> bool:
-    return item.platform in {"Studio portfolios", "Production companies"} or (
+    return (
         current_source_name(item.source_category or "") == "Studios & Agencies"
         and item.platform not in SOURCE_RATINGS
     )
@@ -122,9 +119,9 @@ def source_rating(item: ReferenceItem) -> float:
     if item.platform in SOURCE_RATINGS:
         return SOURCE_RATINGS[item.platform]
     if original_source(item):
-        return SOURCE_RATINGS["Studio portfolios"]
+        return 5.0
     if current_source_name(item.source_category or "") == "Award Archives":
-        return SOURCE_RATINGS["Award archives"]
+        return 4.5
     # A newly supported publisher is not automatically an original creator.
     return 3.5
 

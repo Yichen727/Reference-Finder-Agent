@@ -123,21 +123,18 @@ def test_each_category_is_searchable_with_only_its_selected_scope(settings, disc
         assert "filters" not in call["tools"][0]
 
 
-@pytest.mark.parametrize("seed_state", ["missing", "invalid"])
-def test_registry_metadata_and_search_do_not_read_or_require_seeds(
-    settings, discovery_api, tmp_path, monkeypatch, seed_state
+def test_registry_metadata_and_search_only_need_source_configuration(
+    settings, discovery_api, tmp_path, monkeypatch
 ):
     (tmp_path / "sources.json").write_text(
         files("config").joinpath("sources.json").read_text(encoding="utf-8"), encoding="utf-8"
     )
-    if seed_state == "invalid":
-        (tmp_path / "curated_seeds.json").write_text("Not JSON", encoding="utf-8")
     monkeypatch.setattr(source_registry, "files", lambda package: tmp_path)
     read = source_registry.read_configuration
     read_names = []
 
     def checked_read(filename, directory):
-        assert filename != "curated_seeds.json"
+        assert filename == "sources.json"
         read_names.append(filename)
         return read(filename, directory)
 
@@ -156,11 +153,10 @@ def test_aliases_are_normalized_only_for_new_briefs_and_duplicates_are_collapsed
             "concept": "A film",
             "requested_count": 4,
             "preferred_sources": [
-                "YouTube",
-                "Vimeo",
+                "Video & Film",
                 "Video Platforms",
-                "Studio portfolios",
-                "Production companies",
+                "Studios & Production Companies",
+                "Studios & Agencies",
             ],
         },
     )
@@ -169,7 +165,9 @@ def test_aliases_are_normalized_only_for_new_briefs_and_duplicates_are_collapsed
 
 
 def test_submitted_strategy_cannot_expand_the_briefs_selected_sources(client):
-    brief = client.post("/briefs", json={"concept": "A film", "preferred_sources": ["YouTube"]}).json()
+    brief = client.post(
+        "/briefs", json={"concept": "A film", "preferred_sources": ["Video Platforms"]}
+    ).json()
     proposed = strategy(["Social Platforms"]).model_dump()
     proposed["brief_id"] = brief["id"]
     response = client.post(
@@ -253,55 +251,11 @@ def test_new_publisher_does_not_crash_ranking_or_upgrade_repost_authority():
     assert publisher.ranking.components["source"] == 2.5
 
 
-def test_legacy_stored_research_and_selection_are_read_without_rewriting(client):
-    run, request = completed_run(client, count=4)
-    selected = [item["id"] for item in reversed(run["results"])]
-    client.put(
-        f"/search-runs/{run['id']}/selection", json={"ordered_ids": selected, "expected_version": 0}
-    ).raise_for_status()
-    repository = client.app.state.workflow.repository
-    stored_brief = repository.get("brief", run["brief_id"])
-    stored_brief["preferred_sources"] = ["Vimeo", "YouTube", "Studio portfolios"]
-    stored = repository.get("run", run["id"])
-    stored["strategy"]["preferred_sources"] = ["Vimeo", "YouTube", "Studio portfolios"]
-    stored["strategy"].pop("source_priority", None)
-    stored["coverage"] = [
-        {"category": "Vimeo", "queries_attempted": 1, "references_returned": 4, "note": "Historical coverage"}
-    ]
-    for item in stored["results"]:
-        item["platform"] = "Vimeo"
-        item.pop("source_category", None)
-    with repository.connection() as connection:
-        connection.execute(
-            "UPDATE records SET payload=? WHERE kind='brief' AND id=?",
-            (json.dumps(stored_brief), run["brief_id"]),
-        )
-        connection.execute(
-            "UPDATE records SET payload=? WHERE kind='run' AND id=?", (json.dumps(stored), run["id"])
-        )
-    restored = client.get(f"/search-runs/{run['id']}").json()
-    assert restored["strategy"]["preferred_sources"] == stored["strategy"]["preferred_sources"]
-    assert restored["selection"]["ordered_ids"] == selected
-    assert restored["coverage"][0]["category"] == "Vimeo"
-    assert all(item["platform"] == "Vimeo" for item in restored["results"])
-    response = client.post(f"/search-runs/{run['id']}/exports/pptx", json={"expected_selection_version": 1})
-    assert response.status_code == 201
-    assert repository.get("run", run["id"]) == stored
-    with TestClient(create_app(client.app.state.workflow.settings)) as restarted:
-        assert (
-            restarted.get(f"/briefs/{run['brief_id']}").json()["preferred_sources"]
-            == stored_brief["preferred_sources"]
-        )
-        assert restarted.get(f"/search-runs/{run['id']}").json()["selection"]["ordered_ids"] == selected
-    assert repository.get("brief", run["brief_id"]) == stored_brief
-    assert repository.get("run", run["id"]) == stored
-
-
-def test_pre_migration_submission_fingerprint_can_be_retried(client):
+def test_submission_without_optional_priority_can_be_retried(client):
     brief = client.post(
-        "/briefs", json={"concept": "A film", "requested_count": 4, "preferred_sources": ["YouTube"]}
+        "/briefs", json={"concept": "A film", "requested_count": 4, "preferred_sources": ["Video Platforms"]}
     ).json()
-    old_strategy = strategy(["YouTube"]).model_dump()
+    old_strategy = strategy(["Video Platforms"]).model_dump()
     old_strategy["brief_id"] = brief["id"]
     old_strategy.pop("source_priority")
     request = {"brief_id": brief["id"], "strategy": old_strategy, "idempotency_key": str(uuid4())}

@@ -41,7 +41,7 @@ def main():
         ]
         for index, item in enumerate(run.results):
             item.title = titles[index]
-            item.platform = ["Vimeo", "YouTube", "Studio portfolios", "Award archives"][index]
+            item.platform = ["Vimeo", "YouTube", "studio.test", "clios.com"][index]
             item.creator = "Test Fixture Studio"
             item.annotation.what_it_is = (
                 "A test-only short film description used to verify the reference slide layout. "
