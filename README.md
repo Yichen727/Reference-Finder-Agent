@@ -115,6 +115,15 @@ return fewer usable results. All eight source categories are selected by default
 Video Platforms, Award Archives, Creative Press, Brand Film Showcases,
 Studios & Agencies, Web & Interactive, Podcasts & Interviews,
 and Social Platforms. Deselect any category to narrow your search.
+Every selected category receives at least one search task, ordered by relevance to your brief.
+The per-run request budget expands when needed to reserve one search per selected category
+and one curation call. Selecting all eight requires at least eight search calls and one curation
+call, in addition to the existing brief-planning call. Optional extra searches and retries use
+remaining capacity; retries cannot consume slots reserved for later categories. Authentication,
+quota errors or the total time limit can interrupt coverage; unsearched categories are recorded.
+After evidence checks and deduplication, candidates are sorted by score and the top requested
+number is returned, up to 20. There are no final quotas by source, creator, strand or role.
+If fewer eligible works are available, the app reports the shortfall rather than inventing results.
 Internal case studies are planned for a later phase.
 
 Use **New Research** in the sidebar to start again. Click a title under **Recent Research**

@@ -17,5 +17,7 @@ Examples:
 - "I need references for a renewable energy brand film with a hopeful tone."
   -> "Renewable Energy Brand Film"
 Set source_priority to a unique, brief-relevant ordering drawn only from the supplied
-preferred_sources. Selected categories define allowed scope, not a requirement to
-visit every domain. Podcasts & Interviews is optional; never require GQ on every run.
+preferred_sources. Every selected category will be searched at least once; priorities
+control search order rather than excluding lower-priority selected categories.
+There is no requirement to visit every domain. Podcasts & Interviews is optional;
+never require GQ when that category was not selected.

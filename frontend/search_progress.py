@@ -13,14 +13,19 @@ STAGES = (
 )
 
 
-def pipeline_stage(stage: str) -> tuple[int | None, str]:
+def pipeline_stage(stage: str, *, source_count: int | None = None) -> tuple[int | None, str]:
+    selected = (
+        ""
+        if source_count is None
+        else (f"{source_count} source {'category' if source_count == 1 else 'categories'} selected. ")
+    )
     if stage == "queued":
-        return 1, "Your brief is ready. Waiting for the search to start."
+        return 1, selected + "Your brief is ready. Waiting for the search to start."
     if stage == "starting_external_search":
-        return 1, "Preparing source groups and search queries for your brief."
+        return 1, selected + "Preparing search tasks for every selected source category."
     match = re.fullmatch(r"searching_(\d+)_of_(\d+)", stage)
     if match:
-        return 2, f"Searching source group {match[1]} of {match[2]} for relevant creative work."
+        return 2, selected + f"Searching task {match[1]} of {match[2]} for relevant creative work."
     messages = {
         "checking_public_pages": "Checking public source pages and supporting evidence.",
         "organizing_search_evidence": "Building creative analysis from the available source evidence.",
@@ -38,6 +43,6 @@ def show_search_progress(index: int | None, message: str, *, area=None):
     with area.container():
         status = st.status(STAGES[index] if index is not None else "Finding References", expanded=True)
         if index is not None:
-            status.progress(index / len(STAGES), text=f"Stages completed: {index} of {len(STAGES)}")
+            status.progress(index / len(STAGES), text=f"Stage {index + 1} of {len(STAGES)}")
         status.caption(message)
     return area

@@ -245,13 +245,13 @@ def test_live_search_records_sources_usage_and_exports(settings, discovery_api):
     with TestClient(create_app(live_settings(settings))) as client:
         assert not client.get("/health").json()["live_search_verified"]
         run = execute(client)
-        assert run["status"] == "partial"  # Four searches cannot cover every selected category.
+        assert run["status"] == "completed"
         assert len(run["results"]) == 3
-        assert run["usage"]["web_search_calls"] == 4
-        assert run["usage"]["requests_attempted"] == 5
-        assert run["usage"]["input_tokens"] == 500
+        assert run["usage"]["web_search_calls"] == 8
+        assert run["usage"]["requests_attempted"] == 9
+        assert run["usage"]["input_tokens"] == 900
         assert len(run["coverage"]) == 8
-        assert sum(item["queries_attempted"] >= 1 for item in run["coverage"]) == 4
+        assert all(item["queries_attempted"] >= 1 for item in run["coverage"])
         assert all(
             not item["is_mock"] and item["verification_status"] == "supported" for item in run["results"]
         )
@@ -279,8 +279,8 @@ def test_twenty_reference_request_expands_curation_capacity_without_filling_miss
 ):
     with TestClient(create_app(live_settings(settings))) as client:
         run = execute(client, count=20)
-    # Four test-only source records remain four results, even when twenty are requested.
-    assert run["status"] == "partial" and len(run["results"]) == 4
+    # Eight test-only source records remain eight results; missing evidence is never fabricated.
+    assert run["status"] == "partial" and len(run["results"]) == 8
     curation = next(call for call in discovery_api["calls"] if "text_format" in call)
     assert json.loads(curation["input"])["candidate_limit"] == 20
     assert curation["max_output_tokens"] == 15400
@@ -314,7 +314,7 @@ def test_dead_links_and_generic_pages_cannot_become_recommendations(settings, di
         run = execute(client)
     assert run["status"] == "failed" and not run["results"]
     assert run["page_checks"]
-    assert run["usage"]["requests_attempted"] == 4  # No curation call when every source is unusable.
+    assert run["usage"]["requests_attempted"] == 8  # No curation call when every source is unusable.
 
 
 def test_consulted_only_source_needs_readable_work_text_before_recommendation(settings, discovery_api):
@@ -363,19 +363,20 @@ def test_failed_group_keeps_other_source_results(settings, discovery_api):
     with TestClient(create_app(settings)) as client:
         run = execute(client)
     assert run["status"] == "partial"
-    assert run["results"] and run["usage"]["web_search_calls"] == 3
+    assert run["results"] and run["usage"]["web_search_calls"] == 7
     assert any("timeout" in warning.lower() for warning in run["warnings"])
 
 
 def test_transient_failure_retries_within_global_budget(settings, discovery_api):
+    settings.search_max_requests = 10  # Eight searches, one curation, one spare retry.
     discovery_api["failures"][1] = openai.APITimeoutError(
         request=httpx.Request("POST", "https://api.openai.com")
     )
     with TestClient(create_app(live_settings(settings))) as client:
         run = execute(client)
     assert run["results"]
-    assert run["usage"]["requests_attempted"] == 6
-    assert run["usage"]["requests_succeeded"] == 5
+    assert run["usage"]["requests_attempted"] == 10
+    assert run["usage"]["requests_succeeded"] == 9
 
 
 @pytest.mark.parametrize("mode", ["no_tool", "no_citations"])
@@ -396,6 +397,11 @@ def test_authentication_failure_stops_and_never_exposes_upstream_body(settings, 
     assert run["status"] == "failed" and run["error_code"] == "openai_authentication"
     assert run["usage"]["requests_attempted"] == 1
     assert "sensitive detail" not in json.dumps(run)
+    assert all(
+        "openai_authentication" in entry["note"]
+        for entry in run["coverage"]
+        if entry["queries_attempted"] == 0
+    )
 
 
 @pytest.mark.parametrize(

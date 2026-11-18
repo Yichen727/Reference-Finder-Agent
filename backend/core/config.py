@@ -21,8 +21,18 @@ class Settings(BaseSettings):
     request_timeout_seconds: float = Field(default=45, ge=1, le=120)
     max_references: int = Field(default=MAX_REFERENCES, ge=1, le=MAX_REFERENCES)
     preview_approved_domains: list[str] = Field(default_factory=list, max_length=100)
-    search_query_limit: int = Field(default=4, ge=1, le=8)
-    search_max_requests: int = Field(default=6, ge=2, le=12)
+    search_query_limit: int = Field(
+        default=4,
+        ge=1,
+        le=8,
+        description="Desired task count; every selected category receives at least one task.",
+    )
+    search_max_requests: int = Field(
+        default=6,
+        ge=2,
+        le=12,
+        description="Base request cap, expanded per run to reserve selected-category coverage and curation.",
+    )
     search_candidate_limit: int = Field(default=30, ge=1, le=60)
     search_timeout_seconds: float = Field(default=75, ge=1, le=120)
     search_run_timeout_seconds: float = Field(default=240, ge=10, le=600)

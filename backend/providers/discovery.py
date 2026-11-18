@@ -24,22 +24,23 @@ from backend.schemas.models import (
     normalize_sources,
 )
 from backend.services.page_verification import PageVerifier
-from backend.services.ranking import diverse_shortlist, merge_works, score_reference
+from backend.services.ranking import merge_works, ranked_shortlist, score_reference
 from backend.services.source_policy import SearchJob, SourcePolicy, canonical_url, publishing_platform
 
 
 class RequestBudget:
     """Bound actual application-level requests, including explicit retries."""
 
-    def __init__(self, settings: Settings):
+    def __init__(self, settings: Settings, *, minimum_requests: int = 0):
         self.settings = settings
+        self.max_requests = max(settings.search_max_requests, minimum_requests)
         self.started = time.monotonic()
         self.usage = UsageStats()
 
     def call(self, operation, model: str, *, reserve: int = 0):
         for attempt in range(self.settings.search_retry_count + 1):
             remaining = self.settings.search_run_timeout_seconds - (time.monotonic() - self.started)
-            if remaining <= 0 or self.usage.requests_attempted >= self.settings.search_max_requests - reserve:
+            if remaining <= 0 or self.usage.requests_attempted >= self.max_requests - reserve:
                 raise AppError(
                     "search_budget_exhausted", "The search time or request budget was reached.", 504
                 )
@@ -48,7 +49,10 @@ class RequestBudget:
                 self.usage.models.append(model)
             try:
                 with safe_openai_errors():
-                    response = operation(timeout=min(remaining, self.settings.search_timeout_seconds))
+                    # Protect time for later selected categories and final curation.
+                    response = operation(
+                        timeout=min(remaining / (reserve + 1), self.settings.search_timeout_seconds)
+                    )
                 self.usage.requests_succeeded += 1
                 usage = getattr(response, "usage", None)
                 self.usage.input_tokens += getattr(usage, "input_tokens", 0) or 0
@@ -66,7 +70,11 @@ class RequestBudget:
                     "openai_rate_limit",
                     "openai_unavailable",
                 }
-                if not retryable or attempt >= self.settings.search_retry_count:
+                if (
+                    not retryable
+                    or attempt >= self.settings.search_retry_count
+                    or self.usage.requests_attempted >= self.max_requests - reserve
+                ):
                     raise
                 time.sleep(0.5 * (attempt + 1))
         raise AssertionError("Unreachable request budget state")
@@ -194,13 +202,15 @@ class ExternalDiscovery:
     ) -> SearchOutcome:
         if not self.settings.search_configured:
             raise AppError("openai_not_configured", "Configure the OpenAI key and model settings first.", 503)
-        budget = RequestBudget(self.settings)
         strategy = strategy.model_copy(
             update={
                 "preferred_sources": normalize_sources(strategy.preferred_sources),
                 "source_priority": normalize_sources(strategy.source_priority),
             }
         )
+        # The user's selected scope is mandatory. Raise only the per-run minimum,
+        # without changing settings shared with other searches or editing .env.
+        budget = RequestBudget(self.settings, minimum_requests=len(strategy.preferred_sources) + 1)
         outcome = SearchOutcome(
             coverage=[
                 SourceCoverage(
@@ -212,7 +222,7 @@ class ExternalDiscovery:
         )
         coverage = {item.category: item for item in outcome.coverage}
         notes: dict[str, SourceNote] = {}
-        jobs = self.policy.jobs(strategy, self.settings.search_query_limit, brief)
+        jobs = self.policy.jobs(strategy, self.settings.search_query_limit, brief)[: budget.max_requests - 1]
         prompt = (ROOT / "prompts/search.txt").read_text(encoding="utf-8")
         last_error = None
         try:
@@ -257,7 +267,7 @@ class ExternalDiscovery:
                                 **kwargs,
                             ),
                             self.settings.openai_search_model,
-                            reserve=1,
+                            reserve=len(jobs) - index + 1,
                         )
                         if response.status != "completed":
                             raise AppError(
@@ -393,7 +403,7 @@ class ExternalDiscovery:
                     outcome.warnings.append(
                         f"Merged {len(eligible) - len(merged)} duplicate works; alternate links are kept."
                     )
-                outcome.results = diverse_shortlist(
+                outcome.results = ranked_shortlist(
                     merged, min(brief.requested_count, self.settings.max_references)
                 )
                 if len(eligible) < len(response.output_parsed.references):
@@ -410,6 +420,14 @@ class ExternalDiscovery:
             outcome.warnings.append(error.message)
         finally:
             outcome.usage = budget.finish()
+            for item in outcome.coverage:
+                if item.queries_attempted == 0:
+                    outcome.partial = True
+                    reason = last_error.code if last_error else outcome.error_code or "search_interrupted"
+                    item.note += f" Search was not attempted: {reason}."
+                    outcome.warnings.append(
+                        f"{item.category} was not searched because the run stopped ({reason})."
+                    )
         if outcome.results:
             outcome.error_code = None
             if any(item.verification_status != "supported" for item in outcome.results):
@@ -428,10 +446,6 @@ class ExternalDiscovery:
             "Page checks cover readable source text and work identity. They do not establish video analysis, "
             "complete production details or permission to reproduce images and videos."
         )
-        for item in outcome.coverage:
-            if item.queries_attempted == 0:
-                outcome.partial = True
-                outcome.warnings.append(f"{item.category} was not searched within this run's budget.")
         return outcome
 
     def build_results(self, outcome, draft, notes, brief, strategy):

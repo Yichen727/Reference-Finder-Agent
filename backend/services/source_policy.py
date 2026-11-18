@@ -107,6 +107,7 @@ class SourcePolicy:
         }
 
     def jobs(self, strategy: SearchStrategy, limit: int, brief: StoredBrief | None = None) -> list[SearchJob]:
+        """Cover every selected category before optional additional search strands."""
         selected = normalize_sources(strategy.preferred_sources)
         if not selected or any(category not in self.sources for category in selected):
             raise ValueError("Select at least one registered source category")
@@ -146,9 +147,12 @@ class SourcePolicy:
         )
         jobs = []
         seen = set()
-        for index in range(limit):
+        target = max(limit, len(ordered))
+        for index in range(len(ordered) * len(strategy.strands)):
+            if len(jobs) >= target:
+                break
             categories = [ordered[index % len(ordered)]]
-            strand = strategy.strands[index % len(strategy.strands)]
+            strand = strategy.strands[(index % len(ordered) + index // len(ordered)) % len(strategy.strands)]
             signature = (tuple(categories), tuple(strand.queries))
             if signature in seen:
                 continue

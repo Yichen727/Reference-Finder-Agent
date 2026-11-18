@@ -194,6 +194,77 @@ def test_all_groups_can_be_scheduled_and_priorities_never_expand_scope():
     )
 
 
+@pytest.mark.parametrize("count", [1, 2, 4, 8])
+def test_every_selected_category_is_covered_before_optional_tasks(count):
+    selected = SOURCES[:count]
+    priority = list(reversed(selected))
+    jobs = SourcePolicy().jobs(strategy(selected, priority), 1)
+    assert [job.categories[0] for job in jobs[:count]] == priority
+    assert len(jobs) == count
+
+
+def test_additional_tasks_use_new_strands_after_all_selected_categories():
+    planned = strategy(SOURCES[:2])
+    planned.strands = [
+        QueryStrand(name="Story", intent="Find narratives", queries=["club story film"]),
+        QueryStrand(name="Craft", intent="Find execution", queries=["club visual treatment"]),
+    ]
+    jobs = SourcePolicy().jobs(planned, 4)
+    assert len(jobs) == 4
+    assert {job.categories[0] for job in jobs[:2]} == set(SOURCES[:2])
+    assert len({(tuple(job.categories), tuple(job.queries)) for job in jobs}) == 4
+
+
+@pytest.mark.parametrize("count", [1, 2, 4, 8])
+def test_low_base_budgets_cannot_skip_a_selected_category(settings, discovery_api, count):
+    settings.search_query_limit = 1
+    settings.search_max_requests = 2
+    selected = SOURCES[:count]
+    with TestClient(create_app(live_settings(settings))) as client:
+        run = execute(client, sources=selected, count=4)
+    calls = [call for call in discovery_api["calls"] if "tools" in call]
+    assert {json.loads(call["input"])["source_categories"][0] for call in calls} == set(selected)
+    assert len(calls) == count
+    assert all(entry["queries_attempted"] == 1 for entry in run["coverage"])
+    assert run["usage"]["requests_attempted"] == count + 1
+    assert settings.search_max_requests == 2  # Per-run expansion never mutates shared settings.
+    assert all(call["timeout"] <= settings.search_timeout_seconds for call in calls)
+
+
+def test_early_timeout_does_not_use_another_selected_categorys_request_slot(settings, discovery_api):
+    import httpx
+    import openai
+
+    settings.search_retry_count = 2
+    discovery_api["failures"][1] = openai.APITimeoutError(
+        request=httpx.Request("POST", "https://api.openai.com")
+    )
+    with TestClient(create_app(live_settings(settings))) as client:
+        run = execute(client, count=4)
+    calls = [call for call in discovery_api["calls"] if "tools" in call]
+    assert len(calls) == len(SOURCES)
+    assert len({json.loads(call["input"])["source_categories"][0] for call in calls}) == len(SOURCES)
+    assert all(entry["queries_attempted"] == 1 for entry in run["coverage"])
+    assert run["usage"]["requests_attempted"] == len(SOURCES) + 1
+    assert run["status"] == "partial" and run["results"]
+
+
+def test_all_sources_are_searched_but_only_highest_scoring_references_are_returned(settings, discovery_api):
+    discovery_api["relevance"] = 4
+    with TestClient(create_app(live_settings(settings))) as client:
+        run = execute(client, count=4)
+    assert all(entry["queries_attempted"] >= 1 for entry in run["coverage"])
+    assert len(run["results"]) == 4
+    scores = [item["ranking"]["score"] for item in run["results"]]
+    assert scores == sorted(scores, reverse=True)
+    assert [item["source_category"] for item in run["results"][:3]] == [
+        "Studios & Agencies",
+        "Award Archives",
+        "Video Platforms",
+    ]
+    assert "Social Platforms" not in {item["source_category"] for item in run["results"]}
+
+
 @pytest.mark.parametrize(
     "prompt,first",
     [
@@ -204,7 +275,7 @@ def test_all_groups_can_be_scheduled_and_priorities_never_expand_scope():
 def test_legacy_strategies_get_relevant_local_fallback_without_an_extra_model_call(prompt, first):
     jobs = SourcePolicy().jobs(strategy(), 4, StoredBrief(concept=prompt))
     assert jobs[0].categories == [first]
-    assert len(jobs) <= 4
+    assert len(jobs) == len(SOURCES)
 
 
 def test_existing_planning_call_provides_priority_within_the_same_search_budget(settings, discovery_api):
@@ -218,7 +289,7 @@ def test_existing_planning_call_provides_priority_within_the_same_search_budget(
         "webflow.com",
     ]
     assert run["strategy"]["source_priority"] == ["Web & Interactive"]
-    assert run["usage"]["requests_attempted"] == 5
+    assert run["usage"]["requests_attempted"] == len(SOURCES) + 1
 
 
 def test_out_of_scope_model_priority_is_rejected_before_search(settings, discovery_api):

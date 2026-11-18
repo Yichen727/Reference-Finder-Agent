@@ -288,7 +288,13 @@ def submit_pending():
             if pending.get("brief") is None:
                 pending["brief"] = client.request("POST", "/briefs", pending["brief_input"])
             pending["strategy"] = client.request("POST", f"/briefs/{pending['brief']['id']}/strategy")
-        show_search_progress(1, "Using your brief and research plan to select search sources.", area=area)
+        count = len({current_source_name(name) for name in pending["strategy"]["preferred_sources"]})
+        show_search_progress(
+            1,
+            f"{count} source {'category' if count == 1 else 'categories'} selected. "
+            "Preparing at least one search for each selected category.",
+            area=area,
+        )
         run = client.request(
             "POST",
             "/search-runs",
@@ -417,7 +423,8 @@ def poll_run(run_id):
         st.session_state["run"] = run
         if run["status"] not in {"queued", "running"}:
             st.rerun()
-        index, message = pipeline_stage(run["stage"])
+        count = len({current_source_name(name) for name in run["strategy"]["preferred_sources"]})
+        index, message = pipeline_stage(run["stage"], source_count=count)
         show_search_progress(index, message)
     except APIError as error:
         display_error(error)

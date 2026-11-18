@@ -4,9 +4,9 @@ from pydantic import HttpUrl
 from backend.providers.discovery import supported_description
 from backend.schemas.models import Annotation, CreativeAssessment, PageCheck, ReferenceItem, StoredBrief
 from backend.services.ranking import (
-    diverse_shortlist,
     media_identity,
     merge_works,
+    ranked_shortlist,
     same_work,
     score_reference,
 )
@@ -150,7 +150,7 @@ def test_irrelevant_or_unanchored_assessments_fail_quality_gate():
     assert not score_reference(item, StoredBrief(concept="A human film"), set(item.evidence_ids))
 
 
-def test_diversity_can_add_a_complementary_execution_over_another_near_clone():
+def test_final_shortlist_uses_scores_without_variety_bonuses_or_source_quotas():
     first = score(reference(title="A Shared Future", url="https://studio.test/work/a"))
     clone = score(reference(title="Another Human Story", url="https://studio.test/work/b"))
     different = score(
@@ -163,8 +163,9 @@ def test_diversity_can_add_a_complementary_execution_over_another_near_clone():
         )
     )
     different.tags = ["practical animation"]
-    result = diverse_shortlist([first, clone, different], 2)
-    assert [item.id for item in result] == [first.id, different.id]
+    first.ranking.score, clone.ranking.score, different.ranking.score = 95, 90, 85
+    result = ranked_shortlist([different, clone, first], 2)
+    assert [item.id for item in result] == [first.id, clone.id]
     assert all(item.ranking.reasons and item.ranking.selection_note for item in result)
 
 
@@ -173,7 +174,19 @@ def test_final_shortlist_never_exceeds_twenty():
         score(reference(title=f"Distinct Work {index}", url=f"https://studio.test/work/{index}"))
         for index in range(25)
     ]
-    assert len(diverse_shortlist(items, 100)) == 20
+    assert len(ranked_shortlist(items, 100)) == 20
+
+
+@pytest.mark.parametrize("limit", [1, 4, 8, 20])
+def test_ranked_shortlist_returns_exact_top_n_with_stable_ties(limit):
+    items = [
+        score(reference(title=f"Distinct Film {i}", url=f"https://studio.test/work/{i}")) for i in range(20)
+    ]
+    for i, item in enumerate(items):
+        item.ranking.score = float(i // 2)
+    expected = sorted(items, key=lambda item: item.ranking.score, reverse=True)[:limit]
+    actual = ranked_shortlist(items, limit)
+    assert [item.id for item in actual] == [item.id for item in expected]
 
 
 def test_private_vimeo_hash_remains_in_alternate_link():

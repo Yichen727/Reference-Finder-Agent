@@ -444,11 +444,12 @@ def test_running_progress_uses_pipeline_milestones_and_preserves_submission(brid
         assert not app.exception
         assert app.status[0].label == label and app.status[0].state == "running"
         assert app.get("progress")[0].value == value
-        assert "Stages completed" in app.get("progress")[0].text
+        assert app.get("progress")[0].text == f"Stage {value // 20 + 1} of 5"
         assert not any(item.label == "Find References" for item in app.button)
         assert not card_count(app)
         if stage == "searching_2_of_4":
-            assert any("source group 2 of 4" in item.value for item in app.caption)
+            assert any("Searching task 2 of 4" in item.value for item in app.caption)
+            assert any("8 source categories selected" in item.value for item in app.caption)
     assert [item for item in bridge["requests"] if item[0] == "POST"] == submissions
     # Polling the same real stage does not advance the bar.
     app.run()
@@ -460,6 +461,24 @@ def test_running_progress_uses_pipeline_milestones_and_preserves_submission(brid
         app.run()
         assert not app.status and not app.get("progress")
         assert card_count(app) == 3
+
+
+def test_progress_distinguishes_selected_categories_from_search_tasks(bridge, client):
+    app = open_app()
+    chosen = ["Video Platforms", "Social Platforms"]
+    widget(app.multiselect, "brief_sources").set_value(chosen)
+    app = launch(app, count=4)
+    run = SearchRun.model_validate(app.session_state["run"])
+    run.status, run.stage = "running", "searching_2_of_4"
+    client.app.state.workflow.repository.put("run", run)
+    app.session_state["run"] = run.model_dump(mode="json")
+    app.run()
+    assert not app.exception
+    assert app.get("progress")[0].text == "Stage 3 of 5"
+    assert any(
+        "2 source categories selected" in item.value and "Searching task 2 of 4" in item.value
+        for item in app.caption
+    )
 
 
 @pytest.mark.parametrize("endpoint", ["/briefs", "/strategy"])

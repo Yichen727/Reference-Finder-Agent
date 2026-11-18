@@ -1,4 +1,4 @@
-"""Evidence-aware ranking, conservative work identity and diverse final selection."""
+"""Evidence-aware scoring, conservative work identity and score-ordered selection."""
 
 import re
 import unicodedata
@@ -214,39 +214,16 @@ def score_reference(item: ReferenceItem, brief: StoredBrief, valid_evidence: set
     return True
 
 
-def diverse_shortlist(items: list[ReferenceItem], limit: int) -> list[ReferenceItem]:
-    pool = merge_works(items)
-    selected = []
-    while pool and len(selected) < min(limit, MAX_REFERENCES):
-
-        def value(item):
-            score = item.ranking.score
-            if not selected:
-                return score
-            creator_count = sum(
-                bool(item.creator) and words(other.creator) == words(item.creator) for other in selected
-            )
-            host = urlsplit(str(item.source_url)).hostname
-            host_count = sum(urlsplit(str(other.source_url)).hostname == host for other in selected)
-            tag_set = set(tag.lower() for tag in item.tags)
-            overlap = max(
-                (
-                    len(tag_set & set(tag.lower() for tag in other.tags))
-                    / max(len(tag_set | set(tag.lower() for tag in other.tags)), 1)
-                    for other in selected
-                ),
-                default=0,
-            )
-            novelty = 4 if item.strand not in {other.strand for other in selected} else 0
-            novelty += 2 if item.ranking.role not in {other.ranking.role for other in selected} else 0
-            return score + novelty - min(creator_count * 5, 15) - min(host_count * 3, 9) - overlap * 6
-
-        best = max(pool, key=lambda item: (value(item), item.ranking.score))
-        best.ranking.selection_note = (
-            "Strongest initial evidence-weighted match."
-            if not selected
-            else "Balances evidence-weighted fit with variety in strands, roles, creators and sources."
+def ranked_shortlist(items: list[ReferenceItem], limit: int) -> list[ReferenceItem]:
+    """Select the highest scores after the caller merges duplicate works."""
+    ranked = sorted(
+        (item for item in items if item.ranking is not None),
+        key=lambda item: item.ranking.score,
+        reverse=True,
+    )
+    selected = ranked[: max(0, min(limit, MAX_REFERENCES))]
+    for item in selected:
+        item.ranking.selection_note = (
+            "Selected by descending evidence-weighted score after source checks and deduplication."
         )
-        selected.append(best)
-        pool.remove(best)
     return selected
