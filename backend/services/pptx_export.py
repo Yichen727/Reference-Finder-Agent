@@ -1,4 +1,4 @@
-"""Editable, template-based PPTX export from a saved selection; no network or AI calls."""
+"""Editable, template-based PPTX export with local title fitting; no network or AI calls."""
 
 import base64
 import hashlib
@@ -25,6 +25,7 @@ from backend.services.pptx_package import (
     resolve,
     xml,
 )
+from backend.services.pptx_titles import TitleLayout
 
 TEMPLATE_DIR = Path(__file__).resolve().parents[1] / "templates"
 BASE_TEMPLATE = "Reference Base Template.pptx"
@@ -76,10 +77,7 @@ def prepare_title_area(shapes, value):
     """Start at 54pt and shrink to fit one line without moving the body or image."""
     title = shapes["TITLE"]
     width, _ = shape_size(title)
-    font = ImageFont.load_default(size=54 * 4)
-    # Include a conservative allowance for the supplied template's font metrics.
-    measured_width = max(font.getlength(value) * 1.15 / 4, len(value) * 54 * 0.65)
-    size = min(54, math.floor(54 * width / max(measured_width, 1) * 2) / 2)
+    size = TitleLayout(width).font_size(value)
     if size < 18:
         raise AppError(
             "export_text_overflow",
@@ -143,7 +141,7 @@ def set_paragraphs(shape, paragraphs):
     body.extend(paragraphs)
 
 
-def fill_text(slide, item, annotation, page_number):
+def fill_text(slide, item, annotation, page_number, display_title=None):
     shapes = named_shapes(slide)
     for required in ["SECTION", "TITLE", "BODY COPY", "PAGE NUMBER", "Rectangle 6", "TextBox 7"]:
         if required not in shapes:
@@ -152,7 +150,7 @@ def fill_text(slide, item, annotation, page_number):
     if len(source) != 1:
         raise ValueError("Source placeholder is missing or ambiguous")
     source[0].text = item.platform
-    title = text(item.title).upper()
+    title = text(display_title if display_title is not None else item.title).upper()
     title_size = prepare_title_area(shapes, title)
     title_prototype = shapes["TITLE"].find("p:txBody/a:p", NS)
     set_paragraphs(shapes["TITLE"], [paragraph(title_prototype, title, title_size)])
@@ -338,13 +336,17 @@ def _render(path, brief, run, previews, contexts=None):
     last_slide = slides[-1]
     next_id = max(int(node.get("id")) for node in slides) + 1
     by_id = {item.id: item for item in run.results}
+    title_layout = TitleLayout(
+        shape_size(named_shapes(xml(single.parts[source_slide]))["TITLE"])[0],
+    )
     for index, item_id in enumerate(run.selection.ordered_ids):
         item = by_id[item_id]
         annotation = run.selection.annotation_overrides.get(item_id, item.annotation)
         slide = deepcopy(xml(single.parts[source_slide]))
         for node in slide.xpath("//p:custDataLst", namespaces=NS):
             node.getparent().remove(node)
-        shapes = fill_text(slide, item, annotation, index + 3)
+        display_title = title_layout.truncate(text(item.title))
+        shapes = fill_text(slide, item, annotation, index + 3, display_title)
         part = package.allocate("ppt/slides/slide1.xml")
         relationships = ET.Element(qn("rel:Relationships"), nsmap={None: NS["rel"]})
         add_relationship(

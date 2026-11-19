@@ -122,8 +122,10 @@ Favorites and Packs.
 Continue editing the downloaded file in PowerPoint. Source evidence, verification,
 production considerations, and rights notes are included in speaker notes. Each slide
 reuses its card's cached thumbnail in the left image area, keeping the image's aspect
-ratio. Missing or invalid previews use a placeholder. Exporting does not make additional
-OpenAI calls or download new images.
+ratio. Missing or invalid previews use a placeholder. Exporting does not call OpenAI,
+search or download new images. Titles that cannot fit at 18pt are truncated locally
+at complete-word boundaries with an ellipsis.
+Original reference titles and saved research stay unchanged.
 
 Article and project pages can reuse the official cover of a single associated YouTube or
 Vimeo video found in verified page evidence or readable page metadata. Pages with multiple

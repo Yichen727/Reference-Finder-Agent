@@ -1,8 +1,8 @@
 # PowerPoint export
 
 The primary export is an editable `.pptx`, generated entirely in Python. PowerPoint is
-only needed for the optional visual acceptance check. Export does not search, call
-OpenAI, or download external images.
+only needed for the optional visual acceptance check. Export does not call OpenAI,
+search or download external images. Title fitting and truncation run entirely locally.
 
 ## Templates and slide order
 
@@ -24,9 +24,15 @@ its original case. The bold, underlined **ORIGINAL LINK HERE.** hyperlink replac
 example URL. Additional evidence and usage information goes into notes.
 
 Titles stay on one line, with a maximum of 54pt and a minimum of 18pt. Short titles
-retain 54pt; longer titles shrink without moving the body or image area. Body copy
-may scale down to 9pt; section headings remain 12pt. Content that cannot fit at these
-sizes produces a named-reference error rather than truncated text or additional slides.
+retain 54pt; longer titles shrink without moving the body or image area. Titles still
+too wide at 18pt are truncated at complete-word boundaries with an ellipsis. The retained
+prefix is checked against the same template dimensions, including the ellipsis width.
+A single oversized word becomes an ellipsis. Original reference records, Favorites,
+Pack snapshots and UI titles stay unchanged. Repeated exports use the same local
+calculation; no model request or title cache is needed. Any old model-title cache is ignored.
+
+Body copy may scale down to 9pt; section headings remain 12pt. Body content that cannot fit
+at these sizes still produces a named-reference error rather than truncated text or additional slides.
 Template files are never overwritten.
 
 The package adapter copies the required master/layout/resource graph once, not the
@@ -51,7 +57,7 @@ before caching, and the exporter performs no additional source-image downloads.
 The preview's source URL and available attribution, and the reference's rights information,
 remain in speaker notes; inclusion in a pack does not grant additional image rights.
 Missing, expired or invalid cached images use a clean placeholder. The exporter never
-embeds full videos, downloads uncached images, or calls OpenAI.
+embeds full videos or downloads uncached images.
 
 ## API and compatibility
 
@@ -75,7 +81,8 @@ Historical research-selection export endpoints below remain supported.
 
 Templates missing from an installation produce `export_template_missing`.
 Invalid template versions, shapes or resources produce `export_template_invalid`.
-Content that cannot fit produces `export_text_overflow`. These errors preserve the saved
+Body content that cannot fit produces `export_text_overflow`; long titles use shortening
+and truncation instead. These errors preserve the saved
 pack and prior exports. Temporary or partially generated files are removed.
 
 ## Acceptance checks
