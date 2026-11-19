@@ -9,10 +9,13 @@ from backend.providers.openai_provider import OpenAIProvider
 from backend.repositories.sqlite import Repository
 from backend.schemas.models import (
     ExportRecord,
+    QueryStrand,
     ReferenceBrief,
     ResearchActionInput,
+    ResearchSubmissionInput,
     SearchRequest,
     SearchRun,
+    SearchStrategy,
     Selection,
     SelectionInput,
     StoredBrief,
@@ -50,6 +53,34 @@ class Workflow:
         )
         self.repository.put("brief", brief)
         return brief
+
+    def submit_research(self, request: ResearchSubmissionInput) -> tuple[SearchRun, bool]:
+        """Persist a job before any model call, independently of the frontend page."""
+        if request.brief.requested_count > self.settings.max_references:
+            raise AppError("reference_limit", "Reference count exceeds the server limit.", 422)
+        if not self.settings.search_configured:
+            raise AppError("openai_not_configured", "Configure the OpenAI key and model settings first.", 503)
+        brief = StoredBrief(**{
+            **request.brief.model_dump(),
+            "preferred_sources": normalize_sources(request.brief.preferred_sources),
+        })
+        # Internal queue metadata only; execute() replaces this before any search.
+        strategy = SearchStrategy(
+            brief_id=brief.id, preferred_sources=brief.preferred_sources,
+            summary="Brief analysis is pending.",
+            strands=[QueryStrand(
+                name="Pending analysis", intent="Awaiting creative brief analysis.",
+                queries=["Pending creative brief analysis"],
+            )],
+        )
+        run = SearchRun(
+            brief_id=brief.id, strategy=strategy, mode=self.settings.app_mode, planning_pending=True,
+        )
+        payload = {"submission_type": "background_planning",
+                   **request.model_dump(exclude={"idempotency_key"}, mode="json")}
+        fingerprint = hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
+        result, created = self.repository.create_run(run, request.idempotency_key, fingerprint, brief=brief)
+        return SearchRun.model_validate(result), created
 
     def submit(self, request: SearchRequest) -> tuple[SearchRun, bool]:
         brief = self.brief(request.brief_id)

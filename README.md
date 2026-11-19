@@ -82,6 +82,9 @@ values with `status`, `stop`, and `restart` as you used to start the app.
    The five-stage indicator follows brief analysis, source selection, search,
    verification/ranking, and result preparation. The bar counts completed stages;
    it does not estimate time remaining. Results replace it when ready.
+   Brief analysis and search run in the backend from submission onward. You can switch
+   research or open **New Research** while a task continues, then return from Recent Research
+   to see its progress or completed results. The backend must remain running.
 2. **Browse the cards.** Each card shows a short description of the work. Use
    **View Details** for **What It Is**, **What to Borrow**, and **Why It Fits Your Brief**.
    New research targets 30-50, 50-80 and 40-60 English words respectively, focusing on

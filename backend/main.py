@@ -16,6 +16,7 @@ from backend.schemas.models import (
     ExportRequest,
     ReferenceBrief,
     ResearchActionInput,
+    ResearchSubmissionInput,
     ResearchTitleInput,
     SearchRequest,
     SearchRun,
@@ -119,6 +120,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 "mock_workflow": False,
                 "live_strategy": config.openai_configured,
                 "live_search": config.search_configured,
+                "background_planning": True,
             },
         }
 
@@ -159,8 +161,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return strategy
 
     @app.post("/search-runs", response_model=SearchRun, status_code=202)
-    def submit_run(value: SearchRequest, background: BackgroundTasks):
-        run, created = workflow.submit(value)
+    def submit_run(value: SearchRequest | ResearchSubmissionInput, background: BackgroundTasks):
+        run, created = (
+            workflow.submit_research(value) if isinstance(value, ResearchSubmissionInput)
+            else workflow.submit(value)
+        )
         if created:
             background.add_task(workflow.execute, run.id)
         return run

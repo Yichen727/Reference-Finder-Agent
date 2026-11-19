@@ -139,7 +139,7 @@ def test_home_is_simple_and_defaults_launch_with_one_click(bridge, client):
     assert len(run["results"]) == 10
     assert run["strategy"]["strands"]
     assert run["mode"] == "live"
-    assert sum(method == "POST" and path.endswith("/strategy") for method, path, _ in bridge["requests"]) == 1
+    assert sum(method == "POST" and path.endswith("/strategy") for method, path, _ in bridge["requests"]) == 0
     assert sum(method == "POST" and path == "/search-runs" for method, path, _ in bridge["requests"]) == 1
     app.run()
     pick(app, run, 0)
@@ -211,8 +211,8 @@ def test_search_options_only_expose_sources_and_count_with_a_single_natural_lang
     brief = app.session_state["brief"]
     assert brief["concept"] == prompt
     submitted = next(
-        payload for method, path, payload in bridge["requests"] if method == "POST" and path == "/briefs"
-    )
+        payload for method, path, payload in bridge["requests"] if method == "POST" and path == "/search-runs"
+    )["brief"]
     assert set(submitted) == {"concept", "preferred_sources", "requested_count"}
     assert submitted["concept"] == prompt
     assert app.session_state["run"]["strategy"]["strands"]
@@ -261,7 +261,7 @@ def test_recent_research_and_results_show_generated_topic_instead_of_prompt_open
     app.run()
     widget(app.button, f"research_{run['id']}").click().run()
     assert widget(app.button, f"research_{run['id']}").label == "Human Side of AI"
-    assert sum(method == "POST" and path.endswith("/strategy") for method, path, _ in bridge["requests"]) == 1
+    assert sum(method == "POST" and path.endswith("/strategy") for method, path, _ in bridge["requests"]) == 0
 
 
 def test_old_preview_session_cache_refreshes_without_losing_pack_draft(bridge):
@@ -417,7 +417,7 @@ def test_lost_submission_response_reuses_the_same_run(bridge, client):
     ]
     assert len(submissions) == 2
     assert submissions[0]["idempotency_key"] == submissions[1]["idempotency_key"]
-    assert sum(method == "POST" and path == "/briefs" for method, path, _ in bridge["requests"]) == 1
+    assert sum(method == "POST" and path == "/briefs" for method, path, _ in bridge["requests"]) == 0
 
 
 def test_progress_covers_analysis_source_selection_and_result_preparation(bridge, monkeypatch):
@@ -439,8 +439,8 @@ def test_progress_covers_analysis_source_selection_and_result_preparation(bridge
     monkeypatch.setattr(APIClient, "request", request)
     app = launch(open_app())
     run = app.session_state["run"]
-    assert events.index(("progress", 0)) < events.index(("POST", "/briefs"))
-    assert events.index(("progress", 1)) < events.index(("POST", "/search-runs"))
+    assert events.index(("progress", None)) < events.index(("POST", "/search-runs"))
+    assert ("POST", "/briefs") not in events
     assert events.index(("progress", 4)) < events.index(("GET", f"/search-runs/{run['id']}/presentation"))
     assert not app.status and not app.get("progress")
     assert card_count(app) == 3
@@ -506,13 +506,17 @@ def test_progress_distinguishes_selected_categories_from_search_tasks(bridge, cl
 
 
 @pytest.mark.parametrize("endpoint", ["/briefs", "/strategy"])
-def test_analysis_failure_clears_progress_and_retries_the_pending_request(
+def test_legacy_analysis_failure_clears_progress_and_retries_the_pending_request(
     bridge, client, monkeypatch, endpoint
 ):
     original_request = APIClient.request
     failure = {"pending": True}
 
     def request(self, method, path, *args, **kwargs):
+        if method == "GET" and path == "/health":
+            health = original_request(self, method, path, *args, **kwargs)
+            health["capabilities"]["background_planning"] = False
+            return health
         if failure["pending"] and method == "POST" and path.endswith(endpoint):
             failure["pending"] = False
             raise APIError("The search service could not complete this request.", status=503)

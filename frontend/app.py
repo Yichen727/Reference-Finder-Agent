@@ -291,6 +291,13 @@ def submit_pending():
     pending = st.session_state["pending_research"]
     area = st.empty()
     try:
+        if pending.get("background_planning"):
+            show_search_progress(None, "Submitting research to the background search queue.", area=area)
+            run = client.request("POST", "/search-runs", {
+                "brief": pending["brief_input"], "idempotency_key": pending["submission_key"],
+            })
+            activate_run(run["id"])
+            st.rerun()
         if pending.get("strategy") is None:
             show_search_progress(0, "Understanding your idea and creative constraints.", area=area)
             if pending.get("brief") is None:
@@ -411,6 +418,7 @@ def brief_form(health):
             "brief": None,
             "strategy": None,
             "submission_key": str(uuid4()),
+            "background_planning": bool(health.get("capabilities", {}).get("background_planning")),
             "auto_start": True,
         }
         close_detail()
@@ -428,16 +436,23 @@ def resume_search():
 
 @st.fragment(run_every="2s")
 def poll_run(run_id):
+    if st.session_state.get("run_id") != run_id:
+        return
     try:
         run = client.request("GET", f"/search-runs/{run_id}")
+        if st.session_state.get("run_id") != run_id:
+            return
         st.session_state["run"] = run
         if run["status"] not in {"queued", "running"}:
             st.rerun()
         count = len({current_source_name(name) for name in run["strategy"]["preferred_sources"]})
-        index, message = pipeline_stage(run["stage"], source_count=count)
+        index, message = pipeline_stage(
+            "analysing_brief" if run.get("planning_pending") else run["stage"], source_count=count
+        )
         show_search_progress(index, message)
     except APIError as error:
-        display_error(error)
+        if st.session_state.get("run_id") == run_id:
+            display_error(error)
 
 
 def presentation_needs_refresh(run):
@@ -694,7 +709,9 @@ def result_panel():
         poll_run(run["id"])
         return
     if run["status"] not in {"completed", "partial"}:
-        if run.get("error_code") in {"no_eligible_references", "no_search_evidence"}:
+        if run.get("planning_pending") and run.get("warnings"):
+            st.error(f"We could not finish analysing your brief. {run['warnings'][-1]}")
+        elif run.get("error_code") in {"no_eligible_references", "no_search_evidence"}:
             st.error(
                 "No usable references remained after source checks. Try a different idea or broader sources."
             )

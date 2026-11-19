@@ -95,10 +95,15 @@ def submit_pending(run_id):
 
 @st.fragment(run_every="2s")
 def poll_operation(parent_id, task_id, activate_run):
+    if st.session_state.get("run_id") != parent_id:
+        return
     try:
         task = client.request("GET", f"/search-runs/{task_id}")
     except APIError as error:
-        st.error(f"Could not refresh the research update. Retrying automatically. {error}")
+        if st.session_state.get("run_id") == parent_id:
+            st.error(f"Could not refresh the research update. Retrying automatically. {error}")
+        return
+    if st.session_state.get("run_id") != parent_id:
         return
     if task["status"] in {"queued", "running"}:
         count = len(task["strategy"]["preferred_sources"])

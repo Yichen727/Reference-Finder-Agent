@@ -62,6 +62,11 @@ class ResearchActionInput(Model):
     idempotency_key: str = Field(min_length=1, max_length=100)
 
 
+class ResearchSubmissionInput(Model):
+    brief: ReferenceBrief
+    idempotency_key: str = Field(min_length=1, max_length=100)
+
+
 class QueryStrand(Model):
     name: str = Field(min_length=1, max_length=120)
     intent: str = Field(min_length=1, max_length=1000)
