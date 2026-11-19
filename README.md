@@ -83,8 +83,9 @@ values with `status`, `stop`, and `restart` as you used to start the app.
    verification/ranking, and result preparation. The bar counts completed stages;
    it does not estimate time remaining. Results replace it when ready.
 2. **Browse the cards.** Each card shows a short description of the work. Use
-   **View Details** for **What to Borrow**, the full AI analysis, source evidence, and
-   rights notes. Use **Link** to open the original work. The filter icon beside
+   **View Details** for **What It Is**, **What to Borrow**, and **Why It Fits Your Brief**.
+   The collapsed **Source & Rights** section retains source limitations, verification,
+   evidence and rights notes. Use **Link** to open the original work. The filter icon beside
    **Reference Results** filters by source or creative category.
 3. **Click + to add a reference** to **Your Pack**. Click the checkmark to remove it.
    Filtering does not remove selected references from your pack.
@@ -110,7 +111,7 @@ or permission configured by the workspace administrator. If no usable cover is a
 the first permitted, sufficiently large image in the article body can serve as the preview.
 Logos, avatars, hidden images and tracking pixels are skipped; lazy-loaded and responsive
 image URLs are supported. Missing previews explain their reason
-under **Source Evidence, Verification and Rights**; transient failures can retry on a later
+under **Source & Rights**; transient failures can retry on a later
 interaction after two minutes. Thumbnail retrieval never calls OpenAI.
 
 The default search requests 10 references; you can request up to 20. Some searches

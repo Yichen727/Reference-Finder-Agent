@@ -482,7 +482,10 @@ def main():
             cdp.evaluate("document.querySelector('[role=dialog]').querySelectorAll('textarea').length") == 0
         )
         assert cdp.evaluate(
-            "document.querySelector('[role=dialog]').innerText.includes('Production Considerations')"
+            "(()=>{const text=document.querySelector('[role=dialog]').innerText;"
+            "return ['What It Is','What to Borrow','Why It Fits Your Brief','Source & Rights']"
+            ".every(label=>text.includes(label)) && !text.includes('Production Considerations')"
+            " && !text.includes('Recommendation details and assumptions');})()"
         )
         cdp.screenshot("details.png")
         cdp.click("Remove from Pack", "document.querySelector('[role=dialog]')")

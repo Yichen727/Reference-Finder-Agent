@@ -524,10 +524,10 @@ def reference_details(run, item):
         args=(run_id, item_id),
     ):
         st.rerun()
-    for field, label in EDIT_FIELDS.items():
-        st.markdown(f"**{label}**")
+    for field in ("what_it_is", "what_to_borrow", "why_it_fits"):
+        st.markdown(f"**{EDIT_FIELDS[field]}**")
         st.write(annotation[field])
-    with st.expander("Source Evidence, Verification and Rights"):
+    with st.expander("Source & Rights", expanded=False):
         st.markdown("**Rights and usage**")
         st.write(annotation["rights_note"])
         if preview and preview.get("image"):
@@ -538,7 +538,7 @@ def reference_details(run, item):
         elif preview and preview.get("reason"):
             st.caption("Preview unavailable: " + preview["reason"])
         st.caption(
-            "Source descriptions report evidence; borrowing ideas, route fit and production notes "
+            "Source descriptions report evidence; borrowing ideas and brief-fit analysis "
             "are creative interpretations."
         )
         check = item.get("page_check")
@@ -556,15 +556,6 @@ def reference_details(run, item):
                 )
         for index, url in enumerate(item.get("alternate_urls", [])):
             st.link_button("Alternate Source", url, key=f"alternate_{item_id}_{index}")
-    with st.expander("Recommendation details and assumptions"):
-        if item.get("ranking"):
-            rank = item["ranking"]
-            st.caption(f"Recommendation fit: {rank['score']:.0f}/100 / {rank['role'].replace('_', ' ')}")
-            for reason in rank["reasons"]:
-                st.write(reason)
-            st.write(rank["selection_note"])
-        for assumption in annotation.get("assumptions", []):
-            st.write(assumption)
     done, exclude = st.columns(2)
     if done.button("Done", type="primary", width="stretch"):
         close_detail()

@@ -1,10 +1,12 @@
 import copy
+from io import BytesIO
 from pathlib import Path
+from zipfile import ZipFile
 
 import pytest
 from streamlit.testing.v1 import AppTest
 
-from backend.schemas.models import ApprovedThumbnail, SearchRun
+from backend.schemas.models import ApprovedThumbnail, RankingDetails, SearchRun
 from backend.services.source_registry import load_source_registry
 from frontend.api_client import APIClient, APIError
 from tests.pptx_helpers import slide_text, slides_from_bytes
@@ -800,10 +802,27 @@ def test_frontend_handles_backend_unavailable(monkeypatch):
     assert button(app, "Retry")
 
 
-def test_details_are_read_only_and_open_without_any_api_calls(bridge):
-    app = launch(open_app())
+def test_details_are_read_only_and_open_without_any_api_calls(bridge, client):
+    app = launch(open_app(), count=4)
     run = app.session_state["run"]
     first = run["results"][0]
+    production = "PRODUCTION_FOR_EXPORT_ONLY"
+    assumption = "ASSUMPTION_FOR_EXPORT_ONLY"
+    reason = "RANKING_REASON_FOR_BACKEND_ONLY"
+    first["annotation"]["production_note"] = production
+    first["annotation"]["assumptions"] = [assumption]
+    first["ranking"] = RankingDetails(
+        score=87,
+        components={"relevance": 4},
+        reasons=[reason],
+        role="execution",
+        selection_note="RANKING_SELECTION_FOR_BACKEND_ONLY",
+    ).model_dump()
+    client.app.state.workflow.repository.put("run", SearchRun.model_validate(run))
+    app.session_state["pack_drafts"][run["id"]]["annotations"][first["id"]] = copy.deepcopy(
+        first["annotation"]
+    )
+    before = client.get(f"/search-runs/{run['id']}").json()
     assert not app.text_area
     assert not any(item.label == "New Search" for item in app.expander)
     assert any(item.value == first["annotation"]["what_it_is"] for item in app.main.markdown)
@@ -812,15 +831,45 @@ def test_details_are_read_only_and_open_without_any_api_calls(bridge):
     details(app, first)
     assert bridge["requests"] == calls
     assert not app.text_area and not app.text_input
-    for label in ["What It Is", "What to Borrow", "Why It Fits Your Brief", "Production Considerations"]:
-        assert any(item.value == f"**{label}**" for item in app.markdown)
-    evidence = next(item for item in app.expander if item.label == "Source Evidence, Verification and Rights")
+    main_sections = ["**What It Is**", "**What to Borrow**", "**Why It Fits Your Brief**"]
+    assert [item.value for item in app.markdown if item.value in main_sections] == main_sections
+    assert [item.label for item in app.expander] == ["Source & Rights"]
+    evidence = next(item for item in app.expander if item.label == "Source & Rights")
     assert not evidence.proto.expanded
+    visible = "\n".join(item.value for item in [*app.markdown, *app.caption, *app.text])
+    for hidden in [
+        "Production Considerations",
+        "Recommendation details and assumptions",
+        production,
+        assumption,
+        reason,
+        "RANKING_SELECTION_FOR_BACKEND_ONLY",
+        "Recommendation fit:",
+    ]:
+        assert hidden not in visible
+    assert first["annotation"]["rights_note"] in visible
+    assert first["verification_status"] in visible
+    assert run["evidence"][0]["excerpt"] in visible
+    assert client.get(f"/search-runs/{run['id']}").json() == before
     widget(app.button, f"detail_select_{first['id']}").click().run()
     assert first["id"] in app.session_state["pack_drafts"][run["id"]]["ordered_ids"]
     assert bridge["requests"] == calls
     button(app, "Done").click().run()
     assert not app.text_area
+    button(app, "Export Reference Pack").click().run()
+    assert not app.exception
+    saved = client.get(f"/search-runs/{run['id']}").json()
+    assert saved["results"][0]["ranking"] == first["ranking"]
+    override = saved["selection"]["annotation_overrides"][first["id"]]
+    assert override["production_note"] == production and override["assumptions"] == [assumption]
+    content = app.session_state["pack_downloads"][run["id"]]["content"]
+    with ZipFile(BytesIO(content)) as archive:
+        notes = "\n".join(
+            archive.read(name).decode("utf-8")
+            for name in archive.namelist()
+            if name.startswith("ppt/notesSlides/notesSlide") and name.endswith(".xml")
+        )
+    assert production in notes and assumption in notes
 
 
 def test_description_summary_is_short_and_handles_missing_legacy_descriptions():
