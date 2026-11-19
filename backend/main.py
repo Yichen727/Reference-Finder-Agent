@@ -42,6 +42,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     presentation = PresentationStore(repo)
     thumbnails = ThumbnailService(config, presentation)
     library = ReferenceLibrary(workflow, thumbnails)
+    workflow.on_run_created = library.create_research_pack
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):

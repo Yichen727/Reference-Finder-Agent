@@ -32,7 +32,47 @@ class ReferenceLibrary:
                 "CREATE TABLE IF NOT EXISTS imported_research_packs "
                 "(run_id TEXT PRIMARY KEY, pack_id TEXT NOT NULL)"
             )
+            conn.execute(
+                "CREATE TABLE IF NOT EXISTS research_packs "
+                "(run_id TEXT PRIMARY KEY, pack_id TEXT NOT NULL, pending_name INTEGER NOT NULL)"
+            )
         self.import_legacy_packs()
+
+    def create_research_pack(self, conn, run):
+        """Called inside the new-run transaction; retries never create another pack."""
+        if run.mode != "live" or run.operation == "add":
+            return
+        pack = ReferencePack(name=(run.strategy.research_title or "New Research Pack")[:100])
+        self.save(conn, "reference_packs", pack)
+        conn.execute(
+            "INSERT INTO research_packs VALUES (?,?,?)", (run.id, pack.id, int(run.planning_pending)),
+        )
+        conn.execute("UPDATE library_state SET value=? WHERE key='current_pack'", (pack.id,))
+
+    def sync_research_pack_names(self, conn):
+        """Reuse the completed planning title, while respecting manual pack names."""
+        if not conn.execute("SELECT 1 FROM research_packs WHERE pending_name=1 LIMIT 1").fetchone():
+            return
+        conn.execute("BEGIN IMMEDIATE")
+        rows = conn.execute(
+            "SELECT rp.run_id, rp.pack_id, records.payload FROM research_packs rp "
+            "JOIN records ON records.kind='run' AND records.id=rp.run_id "
+            "WHERE rp.pending_name=1 AND NOT EXISTS (SELECT 1 FROM deleted_packs WHERE id=rp.pack_id)"
+        ).fetchall()
+        for row in rows:
+            run = json.loads(row["payload"])
+            if run.get("planning_pending") or not run["strategy"].get("research_title"):
+                continue
+            title = conn.execute(
+                "SELECT title FROM research_titles WHERE run_id=?", (row["run_id"],),
+            ).fetchone()
+            name = (title["title"] if title else run["strategy"]["research_title"])[:100]
+            pack = self.pack(conn, row["pack_id"])
+            if pack.name != name:
+                pack.name = name
+                self.touch(pack)
+                self.save(conn, "reference_packs", pack)
+            conn.execute("UPDATE research_packs SET pending_name=0 WHERE run_id=?", (row["run_id"],))
 
     @staticmethod
     def save(conn, table, value):
@@ -172,6 +212,7 @@ class ReferenceLibrary:
                 "SELECT payload FROM records WHERE kind='run' AND "
                 "NOT EXISTS (SELECT 1 FROM deleted_research WHERE run_id=records.id) "
                 "AND NOT EXISTS (SELECT 1 FROM imported_research_packs WHERE run_id=records.id) "
+                "AND NOT EXISTS (SELECT 1 FROM research_packs WHERE run_id=records.id) "
                 "ORDER BY rowid"
             ).fetchall()
             imported = []
@@ -205,6 +246,7 @@ class ReferenceLibrary:
 
     def state(self, run_id=None):
         with self.repository.connection() as conn:
+            self.sync_research_pack_names(conn)
             saved = self.all_saved(conn)
             current_id = conn.execute("SELECT value FROM library_state WHERE key='current_pack'").fetchone()[
                 0
@@ -289,6 +331,7 @@ class ReferenceLibrary:
                 pack.name = value.name
                 self.touch(pack)
                 self.save(conn, "reference_packs", pack)
+                conn.execute("UPDATE research_packs SET pending_name=0 WHERE pack_id=?", (pack.id,))
             return pack
 
     def delete_pack(self, pack_id, expected_version):
@@ -299,6 +342,7 @@ class ReferenceLibrary:
             pack = self.pack(conn, pack_id)
             self.check_version(pack, expected_version)
             conn.execute("INSERT INTO deleted_packs VALUES (?)", (pack_id,))
+            conn.execute("UPDATE research_packs SET pending_name=0 WHERE pack_id=?", (pack_id,))
             current = conn.execute("SELECT value FROM library_state WHERE key='current_pack'").fetchone()[0]
             if current == pack_id:
                 other = conn.execute(

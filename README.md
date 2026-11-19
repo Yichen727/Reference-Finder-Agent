@@ -85,6 +85,10 @@ values with `status`, `stop`, and `restart` as you used to start the app.
    Brief analysis and search run in the backend from submission onward. You can switch
    research or open **New Research** while a task continues, then return from Recent Research
    to see its progress or completed results. The backend must remain running.
+   Each submitted research creates an empty Pack and makes it the Current Pack. Its name
+   uses the generated research title; manually renamed Packs keep their names. Regenerate
+   creates another Pack, while Add References keeps the existing one. Browsing older
+   research leaves your chosen Current Pack active so you can combine references.
 2. **Browse the cards.** Each card shows a short description of the work. Use
    **View Details** for **What It Is**, **What to Borrow**, and **Why It Fits Your Brief**.
    New research targets 30-50, 50-80 and 40-60 English words respectively, focusing on
@@ -92,7 +96,7 @@ values with `status`, `stop`, and `restart` as you used to start the app.
    evidence can produce shorter analysis. Cards retain their compact description preview.
    The collapsed **Source & Rights** section retains source limitations, verification,
    evidence and rights notes. Use **Link** to open the original work. The filter icon beside
-   **Reference Results** filters by source or creative category.
+   **Reference Results** filters by source category.
    Use **Add References** to edit the brief, sources and additional count in an inline panel.
    New works are deduplicated and appended to the same research; existing cards, exclusions
    and pack order stay intact. **Regenerate** opens the same panel in version mode and creates

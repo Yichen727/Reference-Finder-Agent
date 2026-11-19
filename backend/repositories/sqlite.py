@@ -137,7 +137,9 @@ class Repository:
                 (run_id, datetime.now(timezone.utc).isoformat()),
             )
 
-    def create_run(self, run: SearchRun, key: str, fingerprint: str, *, brief=None) -> tuple[dict, bool]:
+    def create_run(
+        self, run: SearchRun, key: str, fingerprint: str, *, brief=None, on_created=None,
+    ) -> tuple[dict, bool]:
         with self.connection() as conn:
             conn.execute("BEGIN IMMEDIATE")
             existing = conn.execute(
@@ -186,4 +188,6 @@ class Repository:
             if brief is not None:
                 conn.execute("INSERT INTO records VALUES ('brief',?,?)", (brief.id, brief.model_dump_json()))
             conn.execute("INSERT INTO records VALUES ('run',?,?)", (run.id, run.model_dump_json()))
+            if on_created is not None:
+                on_created(conn, run)
             return run.model_dump(mode="json"), True

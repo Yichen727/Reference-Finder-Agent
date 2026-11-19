@@ -69,6 +69,9 @@ def test_current_pack_survives_research_switch_and_page_refresh(global_bridge, c
     second = research(client, "another-research", distinct=True)
     button(app, "New Research").click().run()
     widget(app.button, f"research_{second['id']}").click().run()
+    assert pack(app)["id"] != first_pack["id"] and not pack(app)["ordered_ids"]
+    second_pack_id = pack(app)["id"]
+    widget(app.selectbox, f"current_pack_choice_{second_pack_id}").set_value(first_pack["id"]).run()
     assert pack(app) == first_pack
     pick(app, second, 1)
     assert len(pack(app)["ordered_ids"]) == 2
@@ -82,6 +85,22 @@ def test_current_pack_survives_research_switch_and_page_refresh(global_bridge, c
     restored.query_params["run"] = second["id"]
     restored.run()
     assert not restored.exception and pack(restored) == expected
+
+
+def test_new_research_adds_and_activates_its_own_pack_without_changing_the_old_pack(global_bridge, client):
+    app = launch(open_app(), count=4)
+    first_run = copy.deepcopy(app.session_state["run"])
+    pick(app, first_run, 0)
+    original = copy.deepcopy(pack(app))
+    original_count = len(app.session_state["library_state"]["packs"])
+    button(app, "New Research").click().run()
+    assert len(client.get("/library").json()["packs"]) == original_count
+    launch(app, concept="A second creative research", count=4)
+    assert not app.exception and pack(app)["id"] != original["id"]
+    assert not pack(app)["ordered_ids"]
+    assert len(app.session_state["library_state"]["packs"]) == original_count + 1
+    assert pack(app)["name"] == app.session_state["run"]["strategy"]["research_title"]
+    assert client.get(f"/packs/{original['id']}").json() == original
 
 
 def test_recent_research_collapse_preserves_active_view_and_pack(global_bridge):

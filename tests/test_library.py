@@ -381,7 +381,13 @@ def test_same_work_retains_the_chosen_research_thumbnail_in_each_pack(client, sa
 
 
 def test_legacy_selection_import_is_once_only_and_preserves_manual_annotation(client, settings):
-    run = research(client)
+    workflow = client.app.state.workflow
+    hook = workflow.on_run_created
+    workflow.on_run_created = None  # Simulate research saved before automatic research packs existed.
+    try:
+        run = research(client)
+    finally:
+        workflow.on_run_created = hook
     annotation = {**run["results"][0]["annotation"], "what_to_borrow": "My historical annotation."}
     client.put(
         f"/search-runs/{run['id']}/selection",

@@ -112,6 +112,25 @@ def main():
         value = cdp.pack_state()
         return value is not None and len(value["ids"]) == count
 
+    def check_pack_dialog(action):
+        for width in (1440, 390):
+            cdp.call(
+                "Emulation.setDeviceMetricsOverride", width=width, height=1000,
+                deviceScaleFactor=1, mobile=False,
+            )
+            browser.wait_until(lambda: cdp.evaluate("""(() => {
+              const a=document.querySelector('.st-key-submit_pack_management button')
+                ?.getBoundingClientRect();
+              const b=document.querySelector('.st-key-cancel_pack_management button')
+                ?.getBoundingClientRect();
+              return a && b && Math.abs(a.top-b.top)<1 && Math.abs(a.width-b.width)<1 && b.left>a.right &&
+                document.documentElement.scrollWidth<=innerWidth;
+            })()"""))
+            cdp.screenshot(f"pack-{action}-dialog-{width}.png")
+        cdp.call(
+            "Emulation.setDeviceMetricsOverride", width=1440, height=1000, deviceScaleFactor=1, mobile=False,
+        )
+
     def click_at(selector, *, right_edge=False):
         point = cdp.evaluate(f"""(() => {{
           const e=document.querySelector({json.dumps(selector)});
@@ -490,6 +509,7 @@ def main():
         click_key(f"pack_options_{original['id']}")
         click_key("pack_manage_create")
         browser.wait_until(lambda: cdp.evaluate("!!document.querySelector('[role=dialog] input')"))
+        check_pack_dialog("create")
         cdp.evaluate("document.querySelector('[role=dialog] input').focus()")
         cdp.call("Input.insertText", text="Favorites Browser Pack")
         cdp.call("Input.dispatchKeyEvent", type="keyDown", key="Tab", code="Tab", windowsVirtualKeyCode=9)
@@ -501,6 +521,12 @@ def main():
         browser.wait_until(lambda: pack_count(1))
         new_pack = request("/library")["current_pack"]
         cdp.screenshot("pack-created-from-favorites.png")
+        click_key(f"pack_options_{new_pack['id']}")
+        click_key("pack_manage_rename")
+        browser.wait_until(lambda: cdp.evaluate("!!document.querySelector('[role=dialog] input')"))
+        check_pack_dialog("rename")
+        click_key("cancel_pack_management")
+        browser.wait_until(lambda: cdp.evaluate("!document.querySelector('[role=dialog]')"))
         select = f".st-key-current_pack_choice_{new_pack['id']} [role=combobox]"
         point = cdp.evaluate(f"""(() => {{
           const r=document.querySelector({json.dumps(select)}).getBoundingClientRect();
@@ -508,9 +534,14 @@ def main():
         }})()""")
         cdp.call("Input.dispatchMouseEvent", type="mousePressed", button="left", clickCount=1, **point)
         cdp.call("Input.dispatchMouseEvent", type="mouseReleased", button="left", clickCount=1, **point)
+        pack_names = [item["name"] for item in request("/library")["packs"]]
+        original_label = (
+            original["name"] if pack_names.count(original["name"]) == 1
+            else f"{original['name']} · {original['id'][:4]}"
+        )
         option = (
             "[...document.querySelectorAll('[role=option]')]"
-            ".find(e=>e.innerText.trim()==='My Reference Pack')"
+            f".find(e=>e.innerText.trim()==={json.dumps(original_label)})"
         )
         browser.wait_until(lambda: cdp.evaluate(f"!!({option})"))
         cdp.evaluate(option + ".click()")

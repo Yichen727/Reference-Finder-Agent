@@ -48,7 +48,7 @@ def test_both_header_actions_open_one_prefilled_inline_panel(bridge):
     assert not any(item.label == "Creative Brief" for item in app.text_area)
     editor(app)
     assert area(app, "Creative Brief").value == app.session_state["brief"]["concept"]
-    sources = next(item for item in app.multiselect if item.label == "Sources")
+    sources = widget(app.multiselect, f"research_edit_{run['id']}_sources")
     assert sources.value == run["strategy"]["preferred_sources"]
     area(app, "Creative Brief").input("Edited brief with a new direction").run()
     app.radio[0].set_value("Regenerate").run()
@@ -124,7 +124,7 @@ def test_editor_validation_keeps_existing_cards_and_does_not_search(bridge, fiel
     if field == "brief":
         area(app, "Creative Brief").input(" ").run()
     else:
-        next(item for item in app.multiselect if item.label == "Sources").set_value([]).run()
+        widget(app.multiselect, f"research_edit_{app.session_state['run_id']}_sources").set_value([]).run()
     button(app, "Find More References").click().run()
     assert not app.exception and card_count(app) == 4
     assert app.error

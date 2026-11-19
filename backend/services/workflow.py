@@ -34,6 +34,7 @@ class Workflow:
         self.job_slot = threading.Semaphore(1)
         self.edit_lock = threading.Lock()
         self.live_search_verified = False
+        self.on_run_created = None
 
     def brief(self, brief_id: str) -> StoredBrief:
         return StoredBrief.model_validate(self.repository.get("brief", brief_id))
@@ -79,7 +80,9 @@ class Workflow:
         payload = {"submission_type": "background_planning",
                    **request.model_dump(exclude={"idempotency_key"}, mode="json")}
         fingerprint = hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
-        result, created = self.repository.create_run(run, request.idempotency_key, fingerprint, brief=brief)
+        result, created = self.repository.create_run(
+            run, request.idempotency_key, fingerprint, brief=brief, on_created=self.on_run_created,
+        )
         return SearchRun.model_validate(result), created
 
     def submit(self, request: SearchRequest) -> tuple[SearchRun, bool]:
@@ -116,7 +119,9 @@ class Workflow:
         if not request.strategy.constraints:
             payload["strategy"].pop("constraints", None)
         fingerprint = hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
-        result, created = self.repository.create_run(run, request.idempotency_key, fingerprint)
+        result, created = self.repository.create_run(
+            run, request.idempotency_key, fingerprint, on_created=self.on_run_created,
+        )
         return SearchRun.model_validate(result), created
 
     def submit_action(self, parent_id: str, request: ResearchActionInput) -> tuple[SearchRun, bool]:
@@ -141,7 +146,9 @@ class Workflow:
         )
         payload = {"parent_run_id": parent_id, **request.model_dump(exclude={"idempotency_key"}, mode="json")}
         fingerprint = hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
-        result, created = self.repository.create_run(run, request.idempotency_key, fingerprint, brief=brief)
+        result, created = self.repository.create_run(
+            run, request.idempotency_key, fingerprint, brief=brief, on_created=self.on_run_created,
+        )
         return SearchRun.model_validate(result), created
 
     def execute(self, run_id: str):

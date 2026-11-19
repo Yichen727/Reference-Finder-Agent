@@ -183,13 +183,17 @@ def management_dialog():
         st.write(pack["name"])
         st.caption("Favorites, research and existing exports will be kept.")
         submitted = st.button("Delete Pack", type="primary", key="confirm_pack_delete")
+        cancelled = st.button("Cancel", key="cancel_pack_management")
     else:
         st.subheader("Create Pack" if action == "create" else "Rename Pack")
         name = st.text_input("Pack name", key="pack_name_input", max_chars=100)
-        submitted = st.button(
-            "Create Pack" if action == "create" else "Save Name", type="primary", key="submit_pack_management"
+        confirm, cancel = st.columns(2, gap="small", wrap=False, vertical_alignment="center")
+        submitted = confirm.button(
+            "Create Pack" if action == "create" else "Save Name",
+            type="primary", key="submit_pack_management", width="stretch",
         )
-    if st.button("Cancel", key="cancel_pack_management"):
+        cancelled = cancel.button("Cancel", key="cancel_pack_management", width="stretch")
+    if cancelled:
         close_management()
         st.rerun()
     if submitted:
