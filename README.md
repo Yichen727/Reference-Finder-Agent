@@ -90,6 +90,13 @@ values with `status`, `stop`, and `restart` as you used to start the app.
    The collapsed **Source & Rights** section retains source limitations, verification,
    evidence and rights notes. Use **Link** to open the original work. The filter icon beside
    **Reference Results** filters by source or creative category.
+   Use **Add References** to edit the brief, sources and additional count in an inline panel.
+   New works are deduplicated and appended to the same research; existing cards, exclusions
+   and pack order stay intact. **Regenerate** opens the same panel in version mode and creates
+   a new linked research when complete, preserving the original research, pack and exports.
+   **Cancel** closes the editor. Each batch retains its search parameters; reopening a saved
+   research restores any pending update. Each search and pack allows up to 20 references,
+   while additional batches can accumulate more cards in one research.
 3. **Click + to add a reference** to **Your Pack**. Click the checkmark to remove it.
    Filtering does not remove selected references from your pack.
 4. **Drag items in Your Pack** into your preferred order. Use **x** to remove an item.

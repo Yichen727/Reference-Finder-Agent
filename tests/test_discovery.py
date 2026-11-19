@@ -241,6 +241,29 @@ def live_settings(settings):
     return settings
 
 
+def test_additional_search_receives_exclusions_and_removes_them_before_final_top_n(settings, discovery_api):
+    from backend.providers.discovery import ExternalDiscovery
+    from backend.schemas.models import StoredBrief
+
+    with TestClient(create_app(live_settings(settings))) as client:
+        original = execute(client, count=4)
+        previous = client.app.state.workflow.run(original["id"]).results
+        brief = StoredBrief(concept="More creative environmental films", requested_count=4)
+        strategy = client.app.state.workflow.provider.strategy(brief)
+        start = discovery_api["web_attempts"]
+        baseline = ExternalDiscovery(settings).search(brief, strategy)
+        excluded = baseline.results[:2]
+        discovery_api["web_attempts"] = start
+        outcome = ExternalDiscovery(settings).search(brief, strategy, excluded_works=excluded + previous)
+        assert len(outcome.results) == 4
+        excluded_titles = {item.title for item in excluded + previous}
+        assert not any(item.title in excluded_titles for item in outcome.results)
+        calls = [json.loads(call["input"]) for call in discovery_api["calls"]]
+        additional = [call for call in calls if "excluded_works" in call]
+        assert additional and any("candidate_limit" in call for call in additional)
+        assert all(len(call["excluded_works"]) == len(excluded + previous) for call in additional)
+
+
 def test_live_search_records_sources_usage_and_exports(settings, discovery_api):
     with TestClient(create_app(live_settings(settings))) as client:
         assert not client.get("/health").json()["live_search_verified"]

@@ -22,13 +22,13 @@ class FixtureProvider:
             strands=[QueryStrand(name="Story", intent="Find human stories", queries=["human story film"])],
         )
 
-    def search(self, brief, strategy, progress=None):
+    def search(self, brief, strategy, progress=None, *, excluded_works=None):
         results, evidence = [], []
         for index in range(brief.requested_count):
             url = f"https://studio.test/work/{new_id()}"
             source = Evidence(
                 source_url=url,
-                page_title=f"Test Reference {index + 1}",
+                page_title=f"Test Reference {index + 1 + len(excluded_works or [])}",
                 excerpt="Test-only source description.",
                 evidence_type="search_summary",
             )
@@ -36,7 +36,7 @@ class FixtureProvider:
             results.append(
                 ReferenceItem(
                     id=new_id(),
-                    title=f"Test Reference {index + 1}",
+                    title=f"Test Reference {index + 1 + len(excluded_works or [])}",
                     platform=brief.preferred_sources[0],
                     source_url=url,
                     tags=["story"],

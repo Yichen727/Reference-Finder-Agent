@@ -19,6 +19,8 @@ def pipeline_stage(stage: str, *, source_count: int | None = None) -> tuple[int 
         if source_count is None
         else (f"{source_count} source {'category' if source_count == 1 else 'categories'} selected. ")
     )
+    if stage == "analysing_brief":
+        return 0, "Understanding the edited creative brief and constraints."
     if stage == "queued":
         return 1, selected + "Your brief is ready. Waiting for the search to start."
     if stage == "starting_external_search":

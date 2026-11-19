@@ -10,6 +10,7 @@ from frontend import layout
 from frontend.api_client import APIClient, APIError
 from frontend.curation import EDIT_FIELDS, apply_pack_action, draft_from_run, selection_payload
 from frontend.pack_component import pack_list
+from frontend.research_actions import is_busy, open_editor, render_editor, restore_operation
 from frontend.search_progress import pipeline_stage, show_search_progress
 
 # A running Streamlit session may still hold layout from before this helper was added.
@@ -25,6 +26,9 @@ def draft_for(run: dict) -> dict:
     drafts = st.session_state.setdefault("pack_drafts", {})
     if run["id"] not in drafts:
         drafts[run["id"]] = draft_from_run(run)
+    else:
+        for item_id, annotation in draft_from_run(run)["annotations"].items():
+            drafts[run["id"]]["annotations"].setdefault(item_id, annotation)
     return drafts[run["id"]]
 
 
@@ -36,6 +40,9 @@ def changed(run_id: str):
 def select_reference(run_id: str, item_id: str, key: str):
     order = st.session_state["pack_drafts"][run_id]["ordered_ids"]
     if st.session_state[key] and item_id not in order:
+        if len(order) >= st.session_state["workspace_health"]["max_references"]:
+            st.session_state[key] = False
+            return
         order.append(item_id)
         rejected = st.session_state["pack_drafts"][run_id].setdefault("rejected_ids", [])
         if item_id in rejected:
@@ -124,6 +131,7 @@ def activate_run(run_id: str, *, reload_saved=False):
         st.session_state.setdefault("pack_downloads", {}).pop(run_id, None)
         st.session_state.pop("conflict_run", None)
     st.session_state.update(run_id=run_id, run=run, brief=brief)
+    restore_operation(run_id)
     st.session_state["recent_runs"] = client.request("GET", "/search-runs")
     close_detail()
     close_management()
@@ -436,6 +444,10 @@ def presentation_needs_refresh(run):
     cached = st.session_state.get("presentations", {}).get(run["id"])
     if cached is None or st.session_state.get("presentation_cache_version") != 5:
         return True
+    if st.session_state.get("presentation_result_ids", {}).get(run["id"]) != [
+        item["id"] for item in run["results"]
+    ]:
+        return True
     missing = any(
         not (cached.get("previews", {}).get(item["id"]) or {}).get("image") for item in run["results"]
     )
@@ -453,6 +465,9 @@ def presentation_for(run):
     if presentation_needs_refresh(run):
         try:
             presentations[run["id"]] = client.request("GET", f"/search-runs/{run['id']}/presentation")
+            st.session_state.setdefault("presentation_result_ids", {})[run["id"]] = [
+                item["id"] for item in run["results"]
+            ]
             loaded_at[run["id"]] = monotonic()
         except APIError:
             # Preview enrichment never prevents browsing an existing result or exporting it.
@@ -498,6 +513,8 @@ def reference_card(run, item, draft, previews):
                     key=f"pick_action_{run_id}_{item_id}",
                     width=40,
                     type="primary" if selected else "secondary",
+                    disabled=not selected and len(draft["ordered_ids"]) >= st.session_state[
+                        "workspace_health"]["max_references"],
                     help="Remove from Pack" if selected else "Add to Pack",
                     on_click=toggle_reference,
                     args=(run_id, item_id),
@@ -520,6 +537,8 @@ def reference_details(run, item):
         "Remove from Pack" if selected else "Add to Pack",
         key=f"detail_select_{item_id}",
         width="stretch",
+        disabled=not selected and len(draft_for(run)["ordered_ids"]) >= st.session_state[
+            "workspace_health"]["max_references"],
         on_click=toggle_reference,
         args=(run_id, item_id),
     ):
@@ -643,6 +662,29 @@ def selection_panel(run, draft):
         )
 
 
+def result_filters(run, draft, active_filters):
+    with st.popover(
+        str(active_filters) if active_filters else "",
+        icon=":material/tune:", type="tertiary", key=f"result_filters_{run['id']}",
+        width=80 if active_filters else 48,
+        help=(f"Filter references ({active_filters} selected values)"
+              if active_filters else "Filter references"),
+    ):
+        platforms = sorted({item["platform"] for item in run["results"]})
+        strands = sorted({item["strand"] for item in run["results"]})
+        source_filter = st.multiselect("Source", platforms, key=f"source_filter_{run['id']}")
+        strand_filter = st.multiselect("Creative Category", strands, key=f"strand_filter_{run['id']}")
+        st.button(
+            "Clear Filters", key=f"clear_filters_{run['id']}", disabled=not active_filters,
+            on_click=clear_filters, args=(run["id"],), width="stretch",
+        )
+        if draft.get("rejected_ids"):
+            st.divider()
+            st.caption(f"{len(draft['rejected_ids'])} references excluded.")
+            st.button("Restore Excluded References", on_click=restore_excluded, args=(run["id"],))
+    return source_filter, strand_filter
+
+
 def result_panel():
     run = st.session_state["run"]
     if run.get("mode") != "live":
@@ -685,36 +727,21 @@ def result_panel():
                     vertical_alignment="center",
                 ):
                     st.subheader("Reference Results", width="content")
-                    with st.popover(
-                        str(active_filters) if active_filters else "",
-                        icon=":material/tune:",
-                        type="tertiary",
-                        key=f"result_filters_{run['id']}",
-                        width=80 if active_filters else 48,
-                        help=f"Filter references ({active_filters} selected values)"
-                        if active_filters
-                        else "Filter references",
+                    with st.container(
+                        key=f"results_actions_{run['id']}", horizontal=True, width="content",
+                        gap="xsmall", vertical_alignment="center",
                     ):
-                        platforms = sorted({item["platform"] for item in run["results"]})
-                        strands = sorted({item["strand"] for item in run["results"]})
-                        source_filter = st.multiselect("Source", platforms, key=f"source_filter_{run['id']}")
-                        strand_filter = st.multiselect(
-                            "Creative Category", strands, key=f"strand_filter_{run['id']}"
+                        source_filter, strand_filter = result_filters(run, draft, active_filters)
+                        st.button(
+                            "Add References", icon=":material/add:", type="primary",
+                            key=f"add_references_{run['id']}", disabled=is_busy(run["id"]),
+                            on_click=open_editor, args=(run["id"], "Add"),
                         )
                         st.button(
-                            "Clear Filters",
-                            key=f"clear_filters_{run['id']}",
-                            disabled=not active_filters,
-                            on_click=clear_filters,
-                            args=(run["id"],),
-                            width="stretch",
+                            "Regenerate", icon=":material/refresh:",
+                            key=f"regenerate_references_{run['id']}", disabled=is_busy(run["id"]),
+                            on_click=open_editor, args=(run["id"], "Regenerate"),
                         )
-                        if draft.get("rejected_ids"):
-                            st.divider()
-                            st.caption(f"{len(draft['rejected_ids'])} references excluded.")
-                            st.button(
-                                "Restore Excluded References", on_click=restore_excluded, args=(run["id"],)
-                            )
                 visible = [
                     item
                     for item in run["results"]
@@ -731,6 +758,10 @@ def result_panel():
                     "Saved Research",
                 )
                 st.caption(f"{len(visible)} Results · {title}")
+            notice = st.session_state.pop("research_action_notice", None)
+            if notice:
+                st.toast(notice)
+            render_editor(run, source_categories, activate_run)
             if not visible:
                 st.info(
                     "No references match these filters. Adjust the filters or restore excluded references."

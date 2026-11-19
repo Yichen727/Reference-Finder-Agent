@@ -175,7 +175,10 @@ def seed(config):
             brief = workflow.brief(record["brief_id"])
             brief.concept = prompt
             workflow.repository.put("brief", brief)
-            runs.append(workflow.run(record["id"]))
+            seeded = workflow.run(record["id"])
+            seeded.strategy.research_title = "Human Side of AI" if index == 0 else prompt
+            workflow.repository.put("run", seeded)
+            runs.append(seeded)
         run = runs[0]
         for item in run.results:
             item.platform = "Vimeo"
@@ -343,6 +346,35 @@ def main():
         )
         assert not cdp.evaluate("!!document.querySelector('[role=progressbar]')")
         print("Actual stage progress, narrow layout and transition to 4 result cards passed", flush=True)
+        for mode, trigger in [("Add", "Add References"), ("Regenerate", "Regenerate")]:
+            action_key = f"add_references_{run.id}" if mode == "Add" else f"regenerate_references_{run.id}"
+            wait_until(lambda: cdp.evaluate(f"!!document.querySelector('.st-key-{action_key} button')"))
+            cdp.evaluate(f"document.querySelector('.st-key-{action_key} button').click()")
+            wait_until(lambda: cdp.evaluate(
+                "document.querySelector('[class*=st-key-research_editor_] textarea')?.value"
+                "==='A film about the human side of AI'"
+            ))
+            wait_until(lambda: cdp.evaluate(
+                "!!document.querySelector('[class*=st-key-research_editor_] button[kind=primary]')"
+            ))
+            for width in (1440, 390):
+                cdp.call(
+                    "Emulation.setDeviceMetricsOverride", width=width, height=1000,
+                    deviceScaleFactor=1, mobile=False,
+                )
+                time.sleep(0.3)
+                assert cdp.evaluate("document.documentElement.scrollWidth<=innerWidth")
+                assert cdp.evaluate(
+                    "document.querySelectorAll('[class*=st-key-card_select_]').length===4"
+                )
+                cdp.screenshot(f"inline-{mode.lower()}-{width}.png")
+            cdp.click("Cancel")
+            wait_until(lambda: cdp.evaluate("!document.querySelector('[class*=st-key-research_editor_]')"))
+            cdp.call(
+                "Emulation.setDeviceMetricsOverride", width=1440, height=1000,
+                deviceScaleFactor=1, mobile=False,
+            )
+        print("Inline Add/Regenerate panels preserve 4 cards at desktop and narrow widths", flush=True)
         wait_until(lambda: cdp.evaluate(f"!!({PACK_ROOT})?.querySelector('.pack-row')"))
         time.sleep(0.5)
         compact_header = """(() => {
@@ -588,8 +620,9 @@ def main():
             assert cdp.evaluate(f"""(() => {{
               const row=document.querySelector('.st-key-results_heading_{run.id}').getBoundingClientRect();
               const icon=({filter_button}).getBoundingClientRect();
+              const group=document.querySelector('.st-key-results_actions_{run.id}').getBoundingClientRect();
               return icon.right<=row.right+1 && icon.width<100 &&
-                Math.abs(icon.top+icon.height/2-row.top-row.height/2)<2;
+                Math.abs(icon.top+icon.height/2-group.top-group.height/2)<2;
             }})()"""), cdp.evaluate(f"""(() => {{
               const row=document.querySelector('.st-key-results_heading_{run.id}');
               return {{width:{width}, row:row.getBoundingClientRect().toJSON(),

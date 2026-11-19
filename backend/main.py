@@ -15,6 +15,7 @@ from backend.schemas.models import (
     ExportRecord,
     ExportRequest,
     ReferenceBrief,
+    ResearchActionInput,
     ResearchTitleInput,
     SearchRequest,
     SearchRun,
@@ -181,6 +182,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.get("/search-runs/{run_id}", response_model=SearchRun)
     def get_run(run_id: UUID):
         return workflow.run(str(run_id))
+
+    @app.post("/search-runs/{run_id}/actions", response_model=SearchRun, status_code=202)
+    def submit_research_action(run_id: UUID, value: ResearchActionInput, background: BackgroundTasks):
+        run, created = workflow.submit_action(str(run_id), value)
+        if created:
+            background.add_task(workflow.execute, run.id)
+        return run
+
+    @app.get("/search-runs/{run_id}/actions", response_model=list[SearchRun])
+    def research_actions(run_id: UUID):
+        return repo.research_actions(str(run_id))
 
     @app.patch("/search-runs/{run_id}/title")
     def rename_research(run_id: UUID, value: ResearchTitleInput):

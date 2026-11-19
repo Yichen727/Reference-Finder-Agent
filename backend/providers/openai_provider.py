@@ -5,7 +5,13 @@ from backend.core.config import ROOT, Settings
 from backend.core.errors import AppError
 from backend.providers.base import ProgressCallback
 from backend.providers.discovery import ExternalDiscovery
-from backend.schemas.models import SearchStrategy, StoredBrief, StrategyDraft, normalize_sources
+from backend.schemas.models import (
+    ReferenceItem,
+    SearchStrategy,
+    StoredBrief,
+    StrategyDraft,
+    normalize_sources,
+)
 
 
 class OpenAIProvider:
@@ -74,5 +80,10 @@ class OpenAIProvider:
                 "invalid_model_output", "OpenAI returned an invalid structured response.", 502
             ) from None
 
-    def search(self, brief: StoredBrief, strategy: SearchStrategy, progress: ProgressCallback | None = None):
-        return ExternalDiscovery(self.settings).search(brief, strategy, progress)
+    def search(
+        self, brief: StoredBrief, strategy: SearchStrategy, progress: ProgressCallback | None = None,
+        *, excluded_works: list[ReferenceItem] | None = None,
+    ):
+        return ExternalDiscovery(self.settings).search(
+            brief, strategy, progress, excluded_works=excluded_works
+        )

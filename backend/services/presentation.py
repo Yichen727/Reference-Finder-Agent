@@ -27,6 +27,12 @@ class PresentationStore:
             ).fetchone()
             if existing:
                 return existing["title"]
+            if run.get("planning_pending"):
+                # Do not persist a temporary label before the edited brief gets its AI title.
+                return (
+                    "Research in progress" if run["status"] in {"queued", "running"}
+                    else "Research did not complete"
+                )
             # The planning response is already persisted with the research run.
             # Reading a title must never invoke a model or excerpt the original prompt.
             title = run["strategy"].get("research_title") or DEFAULT_RESEARCH_TITLE

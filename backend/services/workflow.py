@@ -10,6 +10,7 @@ from backend.repositories.sqlite import Repository
 from backend.schemas.models import (
     ExportRecord,
     ReferenceBrief,
+    ResearchActionInput,
     SearchRequest,
     SearchRun,
     Selection,
@@ -20,6 +21,7 @@ from backend.schemas.models import (
 )
 from backend.services.docx_export import render_docx
 from backend.services.pptx_export import render_pptx
+from backend.services.research_actions import append_batch
 
 
 class Workflow:
@@ -86,10 +88,50 @@ class Workflow:
         result, created = self.repository.create_run(run, request.idempotency_key, fingerprint)
         return SearchRun.model_validate(result), created
 
+    def submit_action(self, parent_id: str, request: ResearchActionInput) -> tuple[SearchRun, bool]:
+        parent = self.run(parent_id)
+        if request.brief.requested_count > self.settings.max_references:
+            raise AppError("reference_limit", "Reference count exceeds the server limit.", 422)
+        if not self.settings.search_configured:
+            raise AppError("openai_not_configured", "Configure the OpenAI key and model settings first.", 503)
+        brief = StoredBrief(
+            **{**request.brief.model_dump(),
+               "preferred_sources": normalize_sources(request.brief.preferred_sources)}
+        )
+        # A queued task carries the previous direction until its own planning step completes.
+        # It cannot search with this placeholder: execute() must finish planning first.
+        strategy = parent.strategy.model_copy(update={
+            "brief_id": brief.id, "preferred_sources": brief.preferred_sources,
+            "source_priority": [], "constraints": "", "research_title": "",
+        })
+        run = SearchRun(
+            brief_id=brief.id, strategy=strategy, mode="live", operation=request.action,
+            parent_run_id=parent.id, planning_pending=True,
+        )
+        payload = {"parent_run_id": parent_id, **request.model_dump(exclude={"idempotency_key"}, mode="json")}
+        fingerprint = hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
+        result, created = self.repository.create_run(run, request.idempotency_key, fingerprint, brief=brief)
+        return SearchRun.model_validate(result), created
+
     def execute(self, run_id: str):
         with self.job_slot:
             run = self.run(run_id)
+            if run.status not in {"queued", "running"}:
+                return
             try:
+                if run.planning_pending:
+                    run.status, run.stage, run.updated_at = "running", "analysing_brief", now()
+                    self.repository.put("run", run)
+                    brief = self.brief(run.brief_id)
+                    strategy = self.provider.strategy(brief)
+                    sources_match = set(normalize_sources(strategy.preferred_sources)) <= set(
+                        brief.preferred_sources)
+                    if strategy.brief_id != brief.id or not sources_match:
+                        raise AppError("strategy_mismatch", "Strategy does not match the edited brief.", 502)
+                    run.strategy, run.planning_pending = strategy, False
+                    if strategy.constraints and not brief.constraints:
+                        brief.constraints = strategy.constraints
+                        self.repository.put("brief", brief)
                 run.status, run.stage, run.updated_at = "running", "starting_external_search", now()
                 self.repository.put("run", run)
 
@@ -97,7 +139,10 @@ class Workflow:
                     run.stage, run.updated_at = stage, now()
                     self.repository.put("run", run)
 
-                outcome = self.provider.search(self.brief(run.brief_id), run.strategy, progress=progress)
+                search_options = {"progress": progress}
+                if run.operation == "add":
+                    search_options["excluded_works"] = self.run(run.parent_run_id).results
+                outcome = self.provider.search(self.brief(run.brief_id), run.strategy, **search_options)
                 status = "partial" if outcome.partial else "completed"
                 if not outcome.results:
                     status = "failed"
@@ -123,6 +168,14 @@ class Workflow:
                     raise AppError("provider_limit", "Provider returned more references than allowed.", 502)
                 if run.mode == "live" and run.results and run.usage.web_search_calls:
                     self.live_search_verified = True
+                if run.operation == "add" and run.results:
+                    with self.edit_lock, self.repository.edit_run(run.parent_run_id) as (parent, conn):
+                        append_batch(parent, run, self.brief(run.brief_id).requested_count)
+                        conn.execute(
+                            "UPDATE records SET payload=? WHERE kind='run' AND id=?",
+                            (run.model_dump_json(), run.id),
+                        )
+                    return
             except AppError as error:
                 run.status, run.stage, run.error_code = "failed", "failed", error.code
                 run.warnings.append(error.message)
@@ -135,8 +188,7 @@ class Workflow:
             self.repository.put("run", run)
 
     def save_selection(self, run_id: str, value: SelectionInput) -> Selection:
-        with self.edit_lock:
-            run = self.run(run_id)
+        with self.edit_lock, self.repository.edit_run(run_id) as (run, _):
             if run.mode != "live":
                 raise AppError("archived_run", "Archived demonstration runs are read-only.", 409)
             if run.status not in {"completed", "partial"}:
@@ -161,7 +213,6 @@ class Workflow:
                 raise AppError("reference_limit", "Selection exceeds the server reference limit.", 422)
             selection = Selection(**value.model_dump(), version=version + 1)
             run.selection, run.updated_at = selection, now()
-            self.repository.put("run", run)
             return selection
 
     def export(

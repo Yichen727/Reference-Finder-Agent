@@ -56,6 +56,12 @@ class StoredBrief(ReferenceBrief):
     created_at: datetime = Field(default_factory=now)
 
 
+class ResearchActionInput(Model):
+    action: Literal["add", "regenerate"]
+    brief: ReferenceBrief
+    idempotency_key: str = Field(min_length=1, max_length=100)
+
+
 class QueryStrand(Model):
     name: str = Field(min_length=1, max_length=120)
     intent: str = Field(min_length=1, max_length=1000)
@@ -206,7 +212,7 @@ class SelectionInput(Model):
     annotation_overrides: dict[str, Annotation] = Field(default_factory=dict, max_length=MAX_REFERENCES)
     rejection_notes: Text = ""
     expected_version: int = Field(ge=0)
-    rejected_ids: list[str] = Field(default_factory=list, max_length=MAX_REFERENCES)
+    rejected_ids: list[str] = Field(default_factory=list)
 
     @field_validator("ordered_ids")
     @classmethod
@@ -290,14 +296,20 @@ class SearchRun(Model):
     mode: Literal["mock", "live"]
     status: Literal["queued", "running", "completed", "partial", "failed", "interrupted"] = "queued"
     stage: str = "queued"
-    results: list[ReferenceItem] = Field(default_factory=list, max_length=MAX_REFERENCES)
-    evidence: list[Evidence] = Field(default_factory=list, max_length=100)
+    # Single search outcomes and packs remain capped; additions can accumulate across batches.
+    results: list[ReferenceItem] = Field(default_factory=list)
+    evidence: list[Evidence] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
     error_code: str | None = None
     usage: UsageStats = Field(default_factory=UsageStats)
     coverage: list[SourceCoverage] = Field(default_factory=list, max_length=8)
-    page_checks: list[PageCheck] = Field(default_factory=list, max_length=60)
+    page_checks: list[PageCheck] = Field(default_factory=list)
     selection: Selection | None = None
+    operation: Literal["search", "add", "regenerate"] = "search"
+    parent_run_id: str | None = None
+    planning_pending: bool = False
+    appended_batch_ids: list[str] = Field(default_factory=list)
+    added_reference_ids: list[str] = Field(default_factory=list)
     created_at: datetime = Field(default_factory=now)
     updated_at: datetime = Field(default_factory=now)
 
