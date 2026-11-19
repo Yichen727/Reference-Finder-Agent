@@ -127,6 +127,7 @@ def test_failure_reason_and_short_retry_ttl_are_persisted(preview_environment, m
     service, item, state = preview_environment
     source_page(item)
     state["html"] = '<meta property="og:image" content="/cover.png">'
+    state["image_statuses"] = {"/cover.png": 404}
     saved = []
     save = service.store.save_preview
 
@@ -137,12 +138,25 @@ def test_failure_reason_and_short_retry_ttl_are_persisted(preview_environment, m
     monkeypatch.setattr(service.store, "save_preview", record)
     result = service.resolve(item)
     assert not result["image"]
-    assert result["reason"] == "Website image permission has not been established."
+    assert result["reason"] == "Preview source returned HTTP 404."
     assert result["preview_version"] == PREVIEW_VERSION
     assert saved == [FAILED_PREVIEW_TTL]
     calls = len(state["requests"])
     service.resolve(item)
     assert len(state["requests"]) == calls
+
+
+def test_previous_permission_failure_is_retried_immediately(preview_environment):
+    service, item, state = preview_environment
+    source_page(item)
+    state["html"] = '<meta property="og:image" content="/cover.png">'
+    service.store.save_preview(
+        service.cache_key(item),
+        {"image": None, "preview_version": 3, "reason": "Website image permission has not been established."},
+        3600,
+    )
+    result = service.resolve(item)
+    assert result["image"] and result["preview_version"] == PREVIEW_VERSION
 
 
 @pytest.mark.parametrize(

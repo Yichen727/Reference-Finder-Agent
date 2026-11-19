@@ -434,7 +434,7 @@ def poll_run(run_id):
 
 def presentation_needs_refresh(run):
     cached = st.session_state.get("presentations", {}).get(run["id"])
-    if cached is None or st.session_state.get("presentation_cache_version") != 3:
+    if cached is None or st.session_state.get("presentation_cache_version") != 5:
         return True
     missing = any(
         not (cached.get("previews", {}).get(item["id"]) or {}).get("image") for item in run["results"]
@@ -445,9 +445,9 @@ def presentation_needs_refresh(run):
 
 def presentation_for(run):
     presentations = st.session_state.setdefault("presentations", {})
-    if st.session_state.get("presentation_cache_version") != 3:
+    if st.session_state.get("presentation_cache_version") != 5:
         presentations.clear()
-        st.session_state["presentation_cache_version"] = 3
+        st.session_state["presentation_cache_version"] = 5
     loaded_at = st.session_state.setdefault("presentation_loaded_at", {})
     cached = presentations.get(run["id"])
     if presentation_needs_refresh(run):

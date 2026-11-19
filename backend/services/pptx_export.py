@@ -205,7 +205,7 @@ def preview_bytes(preview):
     image_uri = (preview or {}).get("image", "")
     if len(image_uri) > 2_700_000:
         return None
-    match = re.fullmatch(r"data:image/(?:png|jpeg|webp|gif);base64,([A-Za-z0-9+/=]+)", image_uri)
+    match = re.fullmatch(r"data:image/(?:png|jpeg|webp|gif|avif);base64,([A-Za-z0-9+/=]+)", image_uri)
     if not match:
         return None
     try:

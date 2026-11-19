@@ -19,7 +19,7 @@ def description_summary(value: str | None) -> str:
 def preview_markup(preview: dict | None, title: str) -> str:
     """Render only backend-validated raster bytes; never inject third-party markup."""
     image = (preview or {}).get("image") or ""
-    if re.fullmatch(r"data:image/(?:jpeg|png|webp|gif);base64,[A-Za-z0-9+/=]+", image):
+    if re.fullmatch(r"data:image/(?:jpeg|png|webp|gif|avif);base64,[A-Za-z0-9+/=]+", image):
         content = f'<img src="{image}" alt="{escape(title, quote=True)} preview" />'
     else:
         content = '<div class="rf-placeholder"><span aria-hidden="true">▧</span>Preview unavailable</div>'

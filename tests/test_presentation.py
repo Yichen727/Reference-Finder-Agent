@@ -47,13 +47,13 @@ def preview_environment(settings):
                 headers={"content-type": "application/json"},
             )
         if request.url.path.startswith("/work/"):
-            return response(body=state["html"].encode())
+            return response(status=state.get("page_status", 200), body=state["html"].encode())
         if state["redirect"]:
             return response(status=302, headers={"location": state["redirect"]})
         return response(
             status=state.get("image_statuses", {}).get(request.url.path, 200),
             body=state.get("image_bodies", {}).get(request.url.path, state["image"]),
-            headers={"content-type": "image/png"},
+            headers={"content-type": state.get("image_type", "image/png"), **state.get("image_headers", {})},
         )
 
     def factory(config):
@@ -115,7 +115,7 @@ def test_unsafe_restricted_or_invalid_images_become_cached_placeholders(preview_
 @pytest.mark.parametrize(
     "permission", ["unknown", "configured", "licensed", "unrelated_license", "noncommercial"]
 )
-def test_og_image_requires_specific_permission(preview_environment, permission):
+def test_og_image_does_not_require_permission_metadata(preview_environment, permission):
     service, item, state = preview_environment
     item.source_url = "https://studio.test/work/futures"
     item.platform = "studio.test"
@@ -139,9 +139,12 @@ def test_og_image_requires_specific_permission(preview_environment, permission):
             + "</script>"
         )
     result = service.resolve(item)
-    assert bool(result["image"]) == (permission in {"configured", "licensed"})
-    if permission in {"unknown", "unrelated_license", "noncommercial"}:
-        assert not any(request.url.path == "/cover.png" for request in state["requests"])
+    assert result["image"]
+    assert result["source_url"] == "https://studio.test/cover.png"
+    if permission == "licensed":
+        assert "Image license: https://creativecommons.org/licenses/by/4.0/" in result["basis"]
+    elif permission != "configured":
+        assert result["basis"] == "Website-declared preview image"
 
 
 def test_vimeo_metadata_preserves_unlisted_access_hash():

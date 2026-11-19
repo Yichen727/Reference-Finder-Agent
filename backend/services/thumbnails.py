@@ -12,15 +12,24 @@ from math import ceil
 from urllib.parse import parse_qs, urlencode, urljoin, urlsplit
 
 import httpx
-from PIL import Image, UnidentifiedImageError
+from PIL import Image, ImageOps, UnidentifiedImageError
 
 from backend.services.page_verification import USER_AGENT, CheckStopped, PageVerifier, PublicHTML
 from backend.services.preview_images import PreviewHTML
 from backend.services.source_policy import canonical_url, domain_matches
 
-PLACEHOLDER = {"image": None, "source_url": None, "basis": "Preview unavailable or permission unconfirmed."}
-IMAGE_TYPES = {"JPEG": "image/jpeg", "PNG": "image/png", "WEBP": "image/webp", "GIF": "image/gif"}
-PREVIEW_VERSION = 3
+PLACEHOLDER = {"image": None, "source_url": None, "basis": "Preview unavailable."}
+IMAGE_TYPES = {
+    "JPEG": "image/jpeg",
+    "PNG": "image/png",
+    "WEBP": "image/webp",
+    "GIF": "image/gif",
+    "AVIF": "image/avif",
+}
+MAX_IMAGE_BYTES = 10_000_000
+MAX_PREVIEW_BYTES = 500_000
+MAX_PREVIEW_DIMENSION = 1280
+PREVIEW_VERSION = 5
 FAILED_PREVIEW_TTL = 120
 PREVIEW_ERRORS = (
     CheckStopped,
@@ -180,7 +189,7 @@ def provider_cover(fetcher, provider, *, embedded=False):
 
 
 def licensed_image(parser: PublicHTML, image_url: str) -> str | None:
-    """Only an image-specific public license establishes automatic website permission."""
+    """Retain matching image-license metadata as attribution, without gating previews."""
 
     def walk(value, depth=0):
         if depth > 8:
@@ -212,7 +221,7 @@ def licensed_image(parser: PublicHTML, image_url: str) -> str | None:
 
 
 def website_images(parser, approved_domains):
-    """Try the declared preview first, then up to three permitted body images."""
+    """Try the declared preview first, then up to three source-declared body images."""
     candidates, seen = [], set()
     og_image = parser.meta.get("og:image", "")
     preview = canonical_url(urljoin(parser.base_url, og_image)) if og_image else None
@@ -223,13 +232,12 @@ def website_images(parser, approved_domains):
         if image_url in seen or body_count >= 3:
             continue
         seen.add(image_url)
+        basis = "Website-declared preview image"
         license_url = licensed_image(parser, image_url)
         if license_url:
-            basis = "Image license: " + license_url
+            basis += ". Image license: " + license_url
         elif domain_matches(parser.base_url, approved_domains):
             basis = "Website preview permission configured by workspace administrator"
-        else:
-            continue
         if from_body:
             basis = "First suitable article image. " + basis
             body_count += 1
@@ -268,15 +276,15 @@ def website_previews(fetcher, item, source, approved_domains, result):
         except PREVIEW_ERRORS as error:
             result["reason"] = preview_failure(error)
     candidates = website_images(parser, approved_domains)
-    if not candidates and (parser.meta.get("og:image") or parser.body_images()):
-        result["reason"] = "Website image permission has not been established."
-    elif not candidates and len(parser.media) > 1:
+    if not candidates and len(parser.media) > 1:
         result["reason"] = "The source page contains several videos; no single cover was chosen."
     yield from candidates
 
 
-def image_preview(fetcher, image_url, basis, *, from_body=False):
-    final, mime, body = fetcher.fetch(image_url, set(IMAGE_TYPES.values()), 2_000_000)
+def compact_preview(body, mime, *, from_body=False):
+    """Validate source bytes, then bound cached and rendered preview dimensions/size."""
+    if len(body) > MAX_IMAGE_BYTES:
+        raise CheckStopped("unverified", "Preview source image is too large.")
     with Image.open(BytesIO(body)) as image:
         if (
             image.format not in IMAGE_TYPES
@@ -286,7 +294,26 @@ def image_preview(fetcher, image_url, basis, *, from_body=False):
             raise CheckStopped("unverified", "Image format or dimensions are unsupported.")
         if from_body and (image.width < 160 or image.height < 90):
             raise CheckStopped("unverified", "Article image is too small for a reference preview.")
+        compact = len(body) <= MAX_PREVIEW_BYTES and max(image.size) <= MAX_PREVIEW_DIMENSION
         image.verify()
+    if compact:
+        return mime, body
+    with Image.open(BytesIO(body)) as image:
+        has_alpha = "A" in image.getbands() or "transparency" in image.info
+        image = ImageOps.exif_transpose(image).convert("RGBA" if has_alpha else "RGB")
+        for edge in (MAX_PREVIEW_DIMENSION, 960, 720, 540):
+            image.thumbnail((edge, edge), Image.Resampling.LANCZOS)
+            for quality in (82, 65, 45):
+                output = BytesIO()
+                image.save(output, format="WEBP", quality=quality)
+                if output.tell() <= MAX_PREVIEW_BYTES:
+                    return "image/webp", output.getvalue()
+    raise CheckStopped("unverified", "Preview could not be compressed to the size limit.")
+
+
+def image_preview(fetcher, image_url, basis, *, from_body=False):
+    final, mime, body = fetcher.fetch(image_url, set(IMAGE_TYPES.values()), MAX_IMAGE_BYTES)
+    mime, body = compact_preview(body, mime, from_body=from_body)
     return {
         "image": f"data:{mime};base64," + base64.b64encode(body).decode("ascii"),
         "source_url": final,
@@ -308,11 +335,10 @@ class ThumbnailService:
         ).hexdigest()
 
     def for_export(self, run) -> dict:
-        """Place the card's validated, permitted preview in the user's reference pack.
+        """Place the card's validated preview in the user's reference pack.
 
-        Preview discovery already checks the source and preview permissions. Reuse
-        that cache without a second domain allowlist or any export-time downloads;
-        retain the source and permission basis for the slide's speaker notes.
+        Reuse the source-validated cache without any export-time downloads;
+        retain the source and available attribution for the slide's speaker notes.
         """
         selected = set(run.selection.ordered_ids) if run.selection else set()
         previews = {}
@@ -330,12 +356,28 @@ class ThumbnailService:
         approved = item.thumbnail.model_dump(mode="json") if item.thumbnail else None
         key = self.cache_key(item)
         cached = self.store.preview(key)
-        if cached is not None and (cached.get("image") or cached.get("preview_version") == PREVIEW_VERSION):
-            return cached
+        if cached is not None:
+            if cached.get("preview_version") == PREVIEW_VERSION:
+                return cached
+            if cached.get("image"):
+                # Resize existing validated images locally; avoid downloading them again.
+                try:
+                    header, encoded = cached["image"].split(",", 1)
+                    mime = header.removeprefix("data:").removesuffix(";base64")
+                    mime, body = compact_preview(base64.b64decode(encoded, validate=True), mime)
+                    cached = {
+                        **cached,
+                        "image": f"data:{mime};base64," + base64.b64encode(body).decode("ascii"),
+                        "preview_version": PREVIEW_VERSION,
+                    }
+                    self.store.save_preview(key, cached, 86400)
+                    return cached
+                except PREVIEW_ERRORS:
+                    pass
         result = {
             **PLACEHOLDER,
             "preview_version": PREVIEW_VERSION,
-            "reason": "No permitted preview metadata was found.",
+            "reason": "No usable source-declared preview was found.",
         }
         try:
             fetcher = self.fetcher_factory(self.settings)
@@ -354,7 +396,7 @@ class ThumbnailService:
                 image_url, basis = approved["url"], "Previously approved preview metadata"
             elif provider:
                 image_url, basis = provider_cover(fetcher, provider)
-            elif item.platform not in {"Instagram", "Pinterest", "YouTube", "Vimeo"}:
+            elif item.platform not in {"YouTube", "Vimeo"}:
                 candidates = website_previews(
                     fetcher, item, source, self.settings.preview_approved_domains, result
                 )

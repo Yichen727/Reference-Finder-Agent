@@ -41,11 +41,14 @@ in the template's left `IMAGE HERE` area. Images retain their aspect ratio and a
 letterboxed rather than distorted. The exporter follows reference IDs and the saved
 pack order, so reordering cannot attach a different reference's thumbnail.
 
-Preview discovery still validates official video metadata or permitted website images,
-including URL, DNS, redirect, robots, file type and size checks. Export adds no second
-domain allowlist; the former `PPTX_IMAGE_APPROVED_DOMAINS` setting is no longer needed.
-`PREVIEW_APPROVED_DOMAINS` remains available for authorised website previews.
-The preview's source URL and permission basis, and the reference's rights information,
+Preview discovery uses official video metadata, website `og:image`, or suitable body
+images. It retains URL, DNS, redirect, robots, file type and size checks, without requiring
+license metadata or a domain allowlist. `PREVIEW_APPROVED_DOMAINS` is optional attribution
+metadata only. JPEG, PNG, WebP, GIF and AVIF previews are converted to PNG for PowerPoint.
+Source downloads allow up to 10 MB; the shared card/export cache stores images with a
+maximum edge of 1280 pixels and a 500 KB file limit. Larger sources are compressed to WebP
+before caching, and the exporter performs no additional source-image downloads.
+The preview's source URL and available attribution, and the reference's rights information,
 remain in speaker notes; inclusion in a pack does not grant additional image rights.
 Missing, expired or invalid cached images use a clean placeholder. The exporter never
 embeds full videos, downloads uncached images, or calls OpenAI.

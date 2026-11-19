@@ -109,9 +109,14 @@ OpenAI calls or download new images.
 
 Article and project pages can reuse the official cover of a single associated YouTube or
 Vimeo video found in verified page evidence or readable page metadata. Pages with multiple
-videos do not get an arbitrary cover. Website images still require an image-specific license
-or permission configured by the workspace administrator. If no usable cover is available,
-the first permitted, sufficiently large image in the article body can serve as the preview.
+videos do not get an arbitrary cover. Website previews use the page's declared `og:image`,
+then the first suitable, sufficiently large image in the article body, without requiring
+license metadata or an administrator domain allowlist. Available attribution is retained.
+JPEG, PNG, WebP, GIF and AVIF are supported; PPTX export converts previews to PNG.
+Source images can be up to 10 MB and 12 million pixels. Cached previews have a maximum
+edge of 1280 pixels and a 500 KB file limit; larger images are resized and compressed to WebP.
+Public image metadata on pages with sign-in prompts can be used without credentials,
+including Instagram and Pinterest. HTTP access denials and robots restrictions still apply.
 Logos, avatars, hidden images and tracking pixels are skipped; lazy-loaded and responsive
 image URLs are supported. Missing previews explain their reason
 under **Source & Rights**; transient failures can retry on a later

@@ -1,5 +1,6 @@
-"""Article-image fallback preserves order, permissions and existing preview export."""
+"""Source-declared article images preserve ordering and existing preview export."""
 
+import base64
 import json
 from io import BytesIO
 from types import SimpleNamespace
@@ -9,11 +10,13 @@ from PIL import Image
 
 from backend.schemas.models import PageCheck
 from backend.services.page_verification import CheckStopped
+from backend.services.pptx_export import preview_bytes
 from backend.services.preview_images import PreviewHTML
+from frontend.layout import preview_markup
 from tests.test_presentation import preview_environment as preview_environment
 
 
-def article(service, item, state, html, *, approved=True):
+def article(service, item, state, html, *, approved=False):
     item.source_url = "https://studio.test/work/futures"
     item.platform = "studio.test"
     item.page_check = None
@@ -67,7 +70,7 @@ def test_normal_lazy_and_responsive_article_images_are_supported(preview_environ
 
 
 @pytest.mark.parametrize("permission", ["unknown", "unrelated", "noncommercial", "licensed", "configured"])
-def test_body_images_require_the_same_explicit_permission_as_og_images(preview_environment, permission):
+def test_body_images_do_not_require_permission_metadata(preview_environment, permission):
     service, item, state = preview_environment
     html = '<article><img src="/first.png"></article>'
     if permission in {"unrelated", "noncommercial", "licensed"}:
@@ -79,12 +82,11 @@ def test_body_images_require_the_same_explicit_permission_as_og_images(preview_e
         )
     article(service, item, state, html, approved=permission == "configured")
     result = service.resolve(item)
-    assert bool(result["image"]) == (permission in {"licensed", "configured"})
-    if permission not in {"licensed", "configured"}:
-        assert not any(request.url.path == "/first.png" for request in state["requests"])
+    assert result["image"]
+    assert result["source_url"] == "https://studio.test/first.png"
 
 
-def test_first_image_without_permission_is_skipped_for_first_licensed_image(preview_environment):
+def test_first_suitable_image_is_not_skipped_for_a_later_licensed_image(preview_environment):
     service, item, state = preview_environment
     article(
         service,
@@ -95,8 +97,52 @@ def test_first_image_without_permission_is_skipped_for_first_licensed_image(prev
         approved=False,
     )
     result = service.resolve(item)
-    assert result["source_url"] == "https://studio.test/licensed.png"
-    assert not any(request.url.path == "/unlicensed.png" for request in state["requests"])
+    assert result["source_url"] == "https://studio.test/unlicensed.png"
+    assert not any(request.url.path == "/licensed.png" for request in state["requests"])
+
+
+@pytest.mark.parametrize("image_format,mime", [("AVIF", "avif"), ("JPEG", "jpeg"), ("WEBP", "webp")])
+@pytest.mark.parametrize("location", ["og", "body"])
+def test_website_formats_render_on_cards_and_convert_to_png_for_pptx(
+    preview_environment, image_format, mime, location
+):
+    service, item, state = preview_environment
+    output = BytesIO()
+    Image.new("RGB", (640, 360), "#557766").save(output, format=image_format)
+    state["image"] = output.getvalue()
+    state["image_type"] = f"image/{mime}"
+    image_url = f"/cover.{mime}"
+    html = (
+        f'<meta property="og:image" content="{image_url}">'
+        if location == "og"
+        else f'<article><img src="{image_url}"></article>'
+    )
+    article(service, item, state, html)
+    result = service.resolve(item)
+    assert result["image"].startswith(f"data:image/{mime};base64,")
+    assert result["source_url"] == f"https://studio.test{image_url}"
+    with Image.open(BytesIO(base64.b64decode(result["image"].split(",", 1)[1]))) as image:
+        assert image.format == image_format
+        image.load()
+    assert "<img" in preview_markup(result, item.title)
+    calls = len(state["requests"])
+    run = SimpleNamespace(results=[item], selection=SimpleNamespace(ordered_ids=[item.id]))
+    assert service.for_export(run) == {item.id: result}
+    with Image.open(BytesIO(preview_bytes(result))) as image:
+        assert image.format == "PNG" and image.size == (1200, 676)
+        image.load()
+    assert len(state["requests"]) == calls
+
+
+@pytest.mark.parametrize("failure", ["corrupt", "wrong_mime"])
+def test_avif_validation_still_rejects_corrupt_or_mislabeled_images(preview_environment, failure):
+    service, item, state = preview_environment
+    output = BytesIO()
+    Image.new("RGB", (160, 90)).save(output, format="AVIF")
+    article(service, item, state, '<meta property="og:image" content="/cover.avif">')
+    state["image"] = b"not an image" if failure == "corrupt" else output.getvalue()
+    state["image_type"] = "image/avif" if failure == "corrupt" else "image/jpeg"
+    assert service.resolve(item)["image"] is None
 
 
 def test_og_preview_keeps_priority_and_body_is_not_downloaded(preview_environment):
