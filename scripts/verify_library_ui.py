@@ -418,6 +418,14 @@ def main():
         ))
         inactive_favorites = navigation_geometry("open_favorites")
         new_research = navigation_geometry("sidebar_new_research")
+        assert cdp.evaluate("""(() => {
+          const start=document.querySelector('.st-key-sidebar_new_research button').getBoundingClientRect();
+          const favorites=document.querySelector('.st-key-open_favorites button').getBoundingClientRect();
+          const rows=[...document.querySelectorAll('[class*=st-key-recent_row_]')]
+            .map(e=>e.getBoundingClientRect());
+          return Math.abs(favorites.top-start.bottom-4)<1 &&
+            Math.abs(favorites.top-start.bottom-(rows[1].top-rows[0].bottom))<1;
+        })()""")
         caption_left = cdp.evaluate("""(() => {
           const labels=[...document.querySelectorAll('[data-testid=stSidebar] p')];
           return ['ATOMIZED STUDIOS','RECENT RESEARCH'].map(text=>

@@ -1012,7 +1012,7 @@ def test_deleting_active_research_requires_confirmation_and_returns_home(bridge,
     button(app, "Cancel").click().run()
     assert selected(app, run, 0)
     widget(app.button, f"delete_{run['id']}").click().run()
-    button(app, "Delete Research").click().run()
+    widget(app.button, "confirm_research_delete").click().run()
     assert not app.exception
     assert client.get(f"/search-runs/{run['id']}").status_code == 404
     assert "run_id" not in app.session_state
@@ -1033,7 +1033,7 @@ def test_deleting_another_research_preserves_active_draft(bridge, client):
     pick(app, active, 1)
     before = copy.deepcopy(app.session_state["pack_drafts"][active["id"]])
     widget(app.button, f"delete_{old['id']}").click().run()
-    button(app, "Delete Research").click().run()
+    widget(app.button, "confirm_research_delete").click().run()
     assert not app.exception
     assert app.session_state["run_id"] == active["id"]
     assert app.session_state["pack_drafts"][active["id"]] == before
@@ -1052,7 +1052,7 @@ def test_management_failure_preserves_current_research_and_unsaved_pack(bridge, 
         widget(app.text_input, f"rename_title_{run['id']}").input("Keep the current research")
         button(app, "Save Title").click().run()
     else:
-        button(app, "Delete Research").click().run()
+        widget(app.button, "confirm_research_delete").click().run()
     assert not app.exception and app.error
     assert app.session_state["run_id"] == run["id"]
     assert app.session_state["pack_drafts"][run["id"]] == before
@@ -1068,7 +1068,7 @@ def test_old_backend_explains_restart_and_preserves_failed_delete_draft(bridge, 
     before = copy.deepcopy(app.session_state["pack_drafts"][run["id"]])
     bridge["stale_backend"] = True
     widget(app.button, f"delete_{run['id']}").click().run()
-    button(app, "Delete Research").click().run()
+    widget(app.button, "confirm_research_delete").click().run()
     assert not app.exception
     assert any("latest backend" in item.value and "Restart the workspace" in item.value for item in app.error)
     assert app.session_state["pack_drafts"][run["id"]] == before

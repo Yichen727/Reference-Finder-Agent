@@ -134,7 +134,7 @@
 [class*="st-key-management_menu_"] :is([class*="st-key-delete_"], .st-key-pack_manage_delete) button {
   color: #87504a;
 }
-.st-key-recent_research_heading { overflow: visible; }
+.st-key-recent_research_heading { margin-top: 8px; overflow: visible; }
 .st-key-toggle_recent_research [data-testid="stIconMaterial"] {
   opacity: 0; transition: opacity .12s ease;
 }

@@ -204,19 +204,20 @@ def toggle_recent_research():
 def sidebar():
     with st.sidebar:
         st.caption("ATOMIZED STUDIOS")
-        st.button(
-            "New Research", icon=":material/edit_square:", key="sidebar_new_research",
-            icon_position="left", on_click=new_research, width="stretch",
-            type="primary" if not st.session_state.get("run_id")
-            and st.session_state.get("view") != "favorites" else "tertiary",
-        )
-        if library.enabled():
-            favorite_count = len(library.state()["favorites"])
+        with st.container(key="sidebar_navigation", gap="xxsmall"):
             st.button(
-                f"Favorites ({favorite_count})", icon=":material/bookmark:", key="open_favorites",
-                icon_position="left", on_click=show_favorites, width="stretch",
-                type="primary" if st.session_state.get("view") == "favorites" else "tertiary",
+                "New Research", icon=":material/edit_square:", key="sidebar_new_research",
+                icon_position="left", on_click=new_research, width="stretch",
+                type="primary" if not st.session_state.get("run_id")
+                and st.session_state.get("view") != "favorites" else "tertiary",
             )
+            if library.enabled():
+                favorite_count = len(library.state()["favorites"])
+                st.button(
+                    f"Favorites ({favorite_count})", icon=":material/bookmark:", key="open_favorites",
+                    icon_position="left", on_click=show_favorites, width="stretch",
+                    type="primary" if st.session_state.get("view") == "favorites" else "tertiary",
+                )
         if "recent_runs" not in st.session_state:
             st.session_state["recent_runs"] = client.request("GET", "/search-runs")
         recent = st.session_state["recent_runs"]
@@ -243,25 +244,23 @@ def sidebar():
                             key=f"research_{item['id']}",
                             width="stretch", wrap=False,
                             type="primary" if active else "tertiary",
-                            help=f"{title} · {item['created_at'][:10]}",
                         ):
                             activate_run(item["id"])
                             st.rerun()
                         with menu_column.popover(
-                            "⋯", key=f"manage_{item['id']}", help=f"Manage {title}",
+                            "⋯", key=f"manage_{item['id']}",
                             type="tertiary", width="stretch",
                         ):
                             with st.container(key=f"management_menu_research_{item['id']}", gap="xxsmall"):
                                 st.button(
-                                    "Rename", key=f"rename_{item['id']}", width="stretch",
+                                    "Rename Research", key=f"rename_{item['id']}", width="stretch",
                                     icon=":material/edit:", icon_position="left", type="tertiary",
                                     on_click=open_management, args=("rename", item["id"], title),
                                 )
                                 st.divider()
                                 st.button(
-                                    "Delete", key=f"delete_{item['id']}", width="stretch",
+                                    "Delete Research", key=f"delete_{item['id']}", width="stretch",
                                     icon=":material/delete:", icon_position="left", type="tertiary",
-                                    help="Confirm deletion after any running search finishes.",
                                     on_click=open_management, args=("delete", item["id"], title),
                                 )
         elif not collapsed:
@@ -303,7 +302,9 @@ def management_dialog():
         )
         st.caption("The saved pack and export files are retained safely. Other research is unaffected.")
         remove, cancel = st.columns(2)
-        submitted = remove.button("Delete Research", type="primary", width="stretch")
+        submitted = remove.button(
+            "Delete Research", key="confirm_research_delete", type="primary", width="stretch",
+        )
         cancelled = cancel.button("Cancel", width="stretch")
         if submitted:
             try:
