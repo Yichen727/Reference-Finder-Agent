@@ -262,25 +262,29 @@ def render_current_pack():
             disabled=blocked(),
         )
         with st.popover(
-            "...",
-            width=48,
+            "⋯",
+            width=32,
             disabled=blocked(),
             type="tertiary",
             key=f"pack_options_{pack['id']}",
             help="Manage Pack",
         ):
-            for action, label in (
-                ("create", "Create Pack"),
-                ("rename", "Rename Pack"),
-                ("delete", "Delete Pack"),
-            ):
-                st.button(
-                    label,
-                    key=f"pack_manage_{action}",
-                    on_click=open_management,
-                    args=(action,),
-                    width="stretch",
-                )
+            with st.container(key=f"management_menu_pack_{pack['id']}", gap="xxsmall"):
+                for action, label, icon in (
+                    ("create", "Create Pack", ":material/add:"),
+                    ("rename", "Rename Pack", ":material/edit:"),
+                    ("delete", "Delete Pack", ":material/delete:"),
+                ):
+                    if action == "delete":
+                        st.divider()
+                    st.button(
+                        label,
+                        key=f"pack_manage_{action}",
+                        on_click=open_management,
+                        args=(action,),
+                        icon=icon, icon_position="left", type="tertiary",
+                        width="stretch",
+                    )
     st.caption("Drag a row to reorder")
     key = f"global_pack_sort_{pack['id']}"
     pack_list(

@@ -98,7 +98,7 @@ def restore_excluded(run_id: str):
 
 def clear_filters(run_id: str):
     st.session_state[f"source_filter_{run_id}"] = []
-    st.session_state[f"strand_filter_{run_id}"] = []
+    st.session_state.pop(f"strand_filter_{run_id}", None)
 
 
 def close_detail():
@@ -251,15 +251,19 @@ def sidebar():
                             "⋯", key=f"manage_{item['id']}", help=f"Manage {title}",
                             type="tertiary", width="stretch",
                         ):
-                            st.button(
-                                "Rename", key=f"rename_{item['id']}", width="stretch",
-                                on_click=open_management, args=("rename", item["id"], title),
-                            )
-                            st.button(
-                                "Delete", key=f"delete_{item['id']}", width="stretch",
-                                help="Confirm deletion after any running search finishes.",
-                                on_click=open_management, args=("delete", item["id"], title),
-                            )
+                            with st.container(key=f"management_menu_research_{item['id']}", gap="xxsmall"):
+                                st.button(
+                                    "Rename", key=f"rename_{item['id']}", width="stretch",
+                                    icon=":material/edit:", icon_position="left", type="tertiary",
+                                    on_click=open_management, args=("rename", item["id"], title),
+                                )
+                                st.divider()
+                                st.button(
+                                    "Delete", key=f"delete_{item['id']}", width="stretch",
+                                    icon=":material/delete:", icon_position="left", type="tertiary",
+                                    help="Confirm deletion after any running search finishes.",
+                                    on_click=open_management, args=("delete", item["id"], title),
+                                )
         elif not collapsed:
             st.caption("No saved research yet.")
 
@@ -739,9 +743,7 @@ def result_filters(run, draft, active_filters):
               if active_filters else "Filter references"),
     ):
         platforms = sorted({item["platform"] for item in run["results"]})
-        strands = sorted({item["strand"] for item in run["results"]})
-        source_filter = st.multiselect("Source", platforms, key=f"source_filter_{run['id']}")
-        strand_filter = st.multiselect("Creative Category", strands, key=f"strand_filter_{run['id']}")
+        source_filter = st.multiselect("Sources", platforms, key=f"source_filter_{run['id']}")
         st.button(
             "Clear Filters", key=f"clear_filters_{run['id']}", disabled=not active_filters,
             on_click=clear_filters, args=(run["id"],), width="stretch",
@@ -750,7 +752,7 @@ def result_filters(run, draft, active_filters):
             st.divider()
             st.caption(f"{len(draft['rejected_ids'])} references excluded.")
             st.button("Restore Excluded References", on_click=restore_excluded, args=(run["id"],))
-    return source_filter, strand_filter
+    return source_filter
 
 
 def result_panel():
@@ -787,9 +789,7 @@ def result_panel():
         results, pack = st.columns([7, 3], gap="medium")
         with results, st.container(key="reference_results", gap="xsmall"):
             with st.container(key="results_summary", gap="xxsmall"):
-                active_filters = len(st.session_state.get(f"source_filter_{run['id']}", [])) + len(
-                    st.session_state.get(f"strand_filter_{run['id']}", [])
-                )
+                active_filters = len(st.session_state.get(f"source_filter_{run['id']}", []))
                 with st.container(
                     key=f"results_heading_{run['id']}",
                     horizontal=True,
@@ -803,7 +803,7 @@ def result_panel():
                         key=f"results_actions_{run['id']}", horizontal=True, width="content",
                         gap="xsmall", vertical_alignment="center",
                     ):
-                        source_filter, strand_filter = result_filters(run, draft, active_filters)
+                        source_filter = result_filters(run, draft, active_filters)
                         st.button(
                             "Add References", icon=":material/add:", type="primary",
                             key=f"add_references_{run['id']}", disabled=is_busy(run["id"]),
@@ -819,7 +819,6 @@ def result_panel():
                     for item in run["results"]
                     if item["id"] not in draft.get("rejected_ids", [])
                     and (not source_filter or item["platform"] in source_filter)
-                    and (not strand_filter or item["strand"] in strand_filter)
                 ]
                 title = presentation.get("title") or next(
                     (

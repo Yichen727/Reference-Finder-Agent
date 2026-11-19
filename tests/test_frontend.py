@@ -696,8 +696,10 @@ def test_filters_preserve_hidden_selections_and_annotation_edits(bridge, client)
     details(restored, first)
     assert any(item.value == "Preserve this annotation through filters" for item in restored.markdown)
     button(restored, "Done").click().run()
-    widget(restored.multiselect, f"strand_filter_{run.id}").set_value(["Execution"]).run()
-    assert card_count(restored) == 1
+    restored.session_state[f"strand_filter_{run.id}"] = ["Execution"]
+    restored.run()
+    assert card_count(restored) == 3
+    assert not any(item.label == "Creative Category" for item in restored.multiselect)
     assert first["id"] in restored.session_state["pack_drafts"][run.id]["ordered_ids"]
 
 
@@ -720,7 +722,7 @@ def test_filter_popover_count_and_clear_preserve_pack_exports_and_exclusions(bri
     assert all(prompt not in item.value for item in app.caption)
     assert not any(item.label == "Filter Results" for item in app.expander)
     popover = widget(app.get("popover"), f"result_filters_{run.id}")
-    assert [item.label for item in popover.multiselect] == ["Source", "Creative Category"]
+    assert [item.label for item in popover.multiselect] == ["Sources"]
     assert popover.proto.popover.label == ""
     assert "tune" in popover.proto.popover.icon
     assert widget(app.button, f"clear_filters_{run.id}").disabled
@@ -734,16 +736,17 @@ def test_filter_popover_count_and_clear_preserve_pack_exports_and_exclusions(bri
     assert card_count(app) == 1
     assert any(item.value == f"1 Results · {title}" for item in app.caption)
     assert widget(app.get("popover"), f"result_filters_{run.id}").proto.popover.label == "1"
-    widget(app.multiselect, f"strand_filter_{run.id}").set_value(["Story"]).run()
-    assert card_count(app) == 0
-    assert widget(app.get("popover"), f"result_filters_{run.id}").proto.popover.label == "2"
+    app.session_state[f"strand_filter_{run.id}"] = ["Story"]
+    app.run()
+    assert card_count(app) == 1
+    assert widget(app.get("popover"), f"result_filters_{run.id}").proto.popover.label == "1"
     assert app.session_state["pack_drafts"][run.id] == before
     widget(app.button, f"clear_filters_{run.id}").click().run()
     assert not app.exception
     assert card_count(app) == 2
     assert selected(app, record, 0)
     assert app.session_state[f"source_filter_{run.id}"] == []
-    assert app.session_state[f"strand_filter_{run.id}"] == []
+    assert f"strand_filter_{run.id}" not in app.session_state
     assert widget(app.get("popover"), f"result_filters_{run.id}").proto.popover.label == ""
     assert widget(app.button, f"clear_filters_{run.id}").disabled
     assert app.session_state["pack_drafts"][run.id] == before

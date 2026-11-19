@@ -1,5 +1,12 @@
 .stMainBlockContainer { padding: 4.5rem 2rem 4rem; }
 .st-key-research_workspace { --rf-border: #dedbd6; }
+/* Let pointer clicks on decorative arrows reach the native input/control. */
+[data-testid="stSelectbox"] button[aria-haspopup="listbox"],
+[data-testid="stMultiSelect"] button[aria-label="Open"] { pointer-events: none; }
+[data-testid="stSelectbox"] button[aria-haspopup="listbox"] {
+  position: absolute; inset: 0 0 0 auto;
+}
+[data-testid="stSelectbox"] input[role="combobox"] { padding-right: 2.75rem; }
 :is(.st-key-sidebar_new_research, .st-key-open_favorites,
     .st-key-recent_research [class*="st-key-research_"]) button {
   display: flex; align-items: center; justify-content: flex-start; text-align: left;
@@ -39,8 +46,8 @@
 }
 .st-key-recent_research [class*="st-key-recent_row_"] [data-testid="stHorizontalBlock"] {
   display: grid !important; grid-template-columns: minmax(0, 1fr) 32px;
-  gap: 4px !important; align-items: center; width: 100%; height: 40px;
-  margin: 0; padding: 0; overflow: visible;
+  gap: 8px !important; align-items: center; width: 100%; height: 40px;
+  box-sizing: border-box; margin: 0; padding: 0 6px 0 0; overflow: visible;
 }
 .st-key-recent_research [class*="st-key-recent_row_"] [data-testid="stColumn"] {
   width: 100% !important; min-width: 0 !important; flex: none !important;
@@ -55,29 +62,77 @@
 .st-key-recent_research [class*="st-key-recent_row_"]:has(button[kind="primary"]) { background: #e6e6e6; }
 .st-key-recent_research [class*="st-key-recent_row_"]:has(button[kind="primary"]):hover { background: #e2e2e2; }
 .st-key-recent_research [class*="st-key-research_"] button,
-.st-key-recent_research [class*="st-key-manage_"] [data-testid="stPopoverButton"] {
+:is(.st-key-recent_research [class*="st-key-manage_"], [class*="st-key-pack_options_"])
+[data-testid="stPopoverButton"] {
   background: transparent !important;
 }
 .st-key-recent_research [class*="st-key-manage_"] { visibility: hidden; }
 .st-key-recent_research [class*="st-key-recent_row_"]:has(button[kind="primary"]) [class*="st-key-manage_"] {
   visibility: visible;
 }
-.st-key-recent_research [class*="st-key-manage_"] [data-testid="stPopoverButton"] {
+:is(.st-key-recent_research [class*="st-key-manage_"], [class*="st-key-pack_options_"])
+[data-testid="stPopoverButton"] {
   height: 40px; min-height: 40px; padding: 0; border: 0;
-  box-sizing: border-box; overflow: clip;
+  position: relative; box-sizing: border-box; overflow: clip;
   display: flex; align-items: center; justify-content: center; color: #57534e;
 }
-.st-key-recent_research [class*="st-key-manage_"] [data-testid="stPopoverButton"] p {
-  display: block; margin: 0; font-size: 18px; line-height: 20px;
+:is(.st-key-recent_research [class*="st-key-manage_"], [class*="st-key-pack_options_"])
+[data-testid="stPopoverButton"] p {
+  display: block; margin: 0; font-size: 20px; line-height: 20px;
 }
-.st-key-recent_research [class*="st-key-manage_"] [data-testid="stPopoverButton"] > div {
+:is(.st-key-recent_research [class*="st-key-manage_"], [class*="st-key-pack_options_"])
+[data-testid="stPopoverButton"] > div {
   width: 100%; min-width: 0; display: flex; justify-content: center; gap: 0;
 }
-.st-key-recent_research [class*="st-key-manage_"] [data-testid="stMarkdownContainer"] {
-  font-size: 18px; line-height: 20px;
+:is(.st-key-recent_research [class*="st-key-manage_"], [class*="st-key-pack_options_"])
+[data-testid="stPopoverButton"] [data-has-shortcut] {
+  width: 100%; justify-content: center; gap: 0;
 }
-.st-key-recent_research [class*="st-key-manage_"] [data-testid="stPopoverButton"] > div > [aria-hidden="true"] {
+:is(.st-key-recent_research [class*="st-key-manage_"], [class*="st-key-pack_options_"])
+[data-testid="stPopoverButton"][aria-expanded="true"] { background: #eeeeee !important; }
+:is(.st-key-recent_research [class*="st-key-manage_"], [class*="st-key-pack_options_"])
+[data-testid="stMarkdownContainer"] {
+  position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+  font-size: 20px; line-height: 20px;
+}
+:is(.st-key-recent_research [class*="st-key-manage_"], [class*="st-key-pack_options_"])
+[data-testid="stPopoverButton"] > div > [aria-hidden="true"] {
   display: none;
+}
+[class*="st-key-pack_options_"] [data-testid="stPopoverButton"] { min-width: 32px; }
+:is(.st-key-recent_research [class*="st-key-manage_"], [class*="st-key-pack_options_"])
+[data-testid="stPopoverButton"]:hover { background: #eeeeee !important; }
+:is(.st-key-recent_research [class*="st-key-manage_"], [class*="st-key-pack_options_"])
+[data-testid="stPopoverButton"]:is(:hover, :active, :focus) { color: #57534e; box-shadow: none; }
+:is(.st-key-recent_research [class*="st-key-manage_"], [class*="st-key-pack_options_"])
+[data-testid="stPopoverButton"]:focus-visible {
+  outline: 2px solid #a8a49c; outline-offset: -2px;
+}
+[data-testid="stPopoverBody"]:has([class*="st-key-management_menu_"]) {
+  box-sizing: border-box; width: 208px; min-width: 0; max-width: calc(100vw - 24px);
+  padding: 6px; border: 1px solid #e5e3df; border-radius: 10px; background: #ffffff;
+  box-shadow: 0 4px 18px rgba(0, 0, 0, .08);
+}
+[class*="st-key-management_menu_"] button {
+  height: 36px; min-height: 36px; padding: 0 10px; border: 0;
+  border-radius: 6px; background: transparent; color: #393733;
+  display: flex; align-items: center; justify-content: flex-start;
+}
+[class*="st-key-management_menu_"] button > div,
+[class*="st-key-management_menu_"] button [data-has-shortcut] {
+  justify-content: flex-start; gap: 10px;
+}
+[class*="st-key-management_menu_"] button p {
+  margin: 0; font-size: 14px; line-height: 20px; font-weight: 400; text-align: left;
+}
+[class*="st-key-management_menu_"] [data-testid="stIconMaterial"] { font-size: 18px; }
+[class*="st-key-management_menu_"] button:hover { background: #eeeeee; color: #25231f; }
+[class*="st-key-management_menu_"] button:focus-visible {
+  outline: 2px solid #a8a49c; outline-offset: -2px; box-shadow: none;
+}
+[class*="st-key-management_menu_"] hr { margin: 3px 6px; border-color: #e5e3df; }
+[class*="st-key-management_menu_"] :is([class*="st-key-delete_"], .st-key-pack_manage_delete) button {
+  color: #87504a;
 }
 .st-key-recent_research_heading { overflow: visible; }
 .st-key-toggle_recent_research [data-testid="stIconMaterial"] {

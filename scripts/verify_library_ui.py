@@ -42,6 +42,8 @@ def seed(config):
     with TestClient(create_app(config)) as client:
         client.app.state.workflow.provider = FixtureProvider()
         first, second = research(client), research(client, "second", distinct=True)
+        first["title"] = "Human Side of AI - Creative Teams, Everyday Work and Shared Possibilities"
+        client.patch(f"/search-runs/{first['id']}/title", json={"title": first["title"]}).raise_for_status()
         thumbnails = client.app.state.thumbnails
         for run in (first, second):
             for item in client.app.state.workflow.run(run["id"]).results:
@@ -110,6 +112,100 @@ def main():
         value = cdp.pack_state()
         return value is not None and len(value["ids"]) == count
 
+    def click_at(selector, *, right_edge=False):
+        point = cdp.evaluate(f"""(() => {{
+          const e=document.querySelector({json.dumps(selector)});
+          e.scrollIntoView({{block:'nearest'}});
+          const r=e.getBoundingClientRect();
+          return {{x:{'r.right-3' if right_edge else 'r.left+r.width/2'},y:r.top+r.height/2}};
+        }})()""")
+        cdp.call("Input.dispatchMouseEvent", type="mouseMoved", **point)
+        for event in ("mousePressed", "mouseReleased"):
+            cdp.call("Input.dispatchMouseEvent", type=event, button="left", clickCount=1, **point)
+
+    def check_arrow(key):
+        field = f".st-key-{key}"
+        arrow = field + ' button[aria-label="Open"]'
+        for right_edge in (False, True):
+            click_at(arrow, right_edge=right_edge)
+            expanded = (
+                f"document.querySelector({json.dumps(field + ' input[role=combobox]')})"
+                "?.getAttribute('aria-expanded')==='true' && !!document.querySelector('[role=listbox]')"
+            )
+            browser.wait_until(lambda: cdp.evaluate(expanded), timeout=5)
+            time.sleep(0.4)
+            assert cdp.evaluate(expanded), f"Arrow dropdown closed after the click: {key}"
+            browser.wait_until(lambda: cdp.evaluate("""(() => {
+              const list=document.querySelector('[role=listbox]');
+              if (!list) return false;
+              const r=list.getBoundingClientRect();
+              const hit=document.elementFromPoint(r.left+r.width/2,r.top+r.height/2);
+              return r.width>0 && r.height>0 && list.contains(hit);
+            })()"""), timeout=5)
+            cdp.screenshot(f"arrow-{key[:20]}.png")
+            for event in ("keyDown", "keyUp"):
+                cdp.call(
+                    "Input.dispatchKeyEvent", type=event, key="Escape", code="Escape",
+                    windowsVirtualKeyCode=27,
+                )
+            browser.wait_until(lambda: cdp.evaluate("!document.querySelector('[role=listbox]')"))
+
+    def check_management_menu(trigger_key, item_keys, screenshot):
+        click_key(trigger_key)
+        trigger = cdp.evaluate(f"""(() => {{
+          const button=document.querySelector('.st-key-'+{json.dumps(trigger_key)}+' button');
+          const a=button.getBoundingClientRect(), b=button.querySelector('p').getBoundingClientRect();
+          return {{x:Math.abs(a.left+a.width/2-b.left-b.width/2),
+            y:Math.abs(a.top+a.height/2-b.top-b.height/2),background:getComputedStyle(button).backgroundColor}};
+        }})()""")
+        assert trigger["x"] < 1 and trigger["y"] < 1, trigger
+        assert trigger["background"] == "rgb(238, 238, 238)", trigger
+        selector = '[data-testid="stPopoverBody"]:has([class*="st-key-management_menu_"])'
+        browser.wait_until(lambda: cdp.evaluate(f"!!document.querySelector({json.dumps(selector)})"))
+        metrics = cdp.evaluate(f"""(() => {{
+          const menu=document.querySelector({json.dumps(selector)});
+          const keys={json.dumps(item_keys)};
+          return {{width:menu.getBoundingClientRect().width,
+            dividers:menu.querySelectorAll('hr').length,
+            items:keys.map(key=>{{
+              const button=menu.querySelector('.st-key-'+key+' button'), style=getComputedStyle(button);
+              const icon=button.querySelector('[data-testid=stIconMaterial]');
+              const label=button.querySelector('p');
+              return {{border:style.borderWidth,background:style.backgroundColor,
+                height:button.getBoundingClientRect().height,icon:icon?.innerText,
+                icon_size:getComputedStyle(icon).fontSize,
+                gap:label.getBoundingClientRect().left-icon.getBoundingClientRect().right,
+                label_x:label.getBoundingClientRect().left,
+                font:getComputedStyle(label).fontSize}};
+            }})}};
+        }})()""")
+        assert 180 <= metrics["width"] <= 224 and metrics["dividers"] == 1, metrics
+        assert all(
+            item["border"] == "0px" and item["background"] == "rgba(0, 0, 0, 0)"
+            and item["height"] == 36 and item["icon"] in {"add", "edit", "delete"}
+            and item["icon_size"] == "18px" and item["font"] == "14px" and item["gap"] >= 8
+            for item in metrics["items"]
+        ), metrics
+        assert max(item["label_x"] for item in metrics["items"]) - min(
+            item["label_x"] for item in metrics["items"]
+        ) < 1, metrics
+        point = cdp.evaluate(f"""(() => {{
+          const button=document.querySelector('.st-key-'+{json.dumps(item_keys[0])}+' button');
+          const r=button.getBoundingClientRect();
+          return {{x:r.left+r.width/2,y:r.top+r.height/2}};
+        }})()""")
+        cdp.call("Input.dispatchMouseEvent", type="mouseMoved", **point)
+        browser.wait_until(lambda: cdp.evaluate(
+            f"getComputedStyle(document.querySelector('.st-key-'+{json.dumps(item_keys[0])}+' button'))"
+            ".backgroundColor==='rgb(238, 238, 238)'"
+        ))
+        cdp.screenshot(screenshot)
+        for event in ("keyDown", "keyUp"):
+            cdp.call(
+                "Input.dispatchKeyEvent", type=event, key="Escape", code="Escape", windowsVirtualKeyCode=27
+            )
+        browser.wait_until(lambda: cdp.evaluate(f"!document.querySelector({json.dumps(selector)})"))
+
     try:
         start(
             [sys.executable, "-m", "uvicorn", "backend.main:app", "--host", "127.0.0.1", "--port", "8110"],
@@ -163,8 +259,7 @@ def main():
             "Emulation.setDeviceMetricsOverride", width=1440, height=1000, deviceScaleFactor=1, mobile=False
         )
         cdp.call("Page.navigate", url=FRONTEND + f"/?run={first['id']}")
-        browser.wait_until(lambda: cards(4) and cdp.pack_state() is not None)
-        assert len(cdp.pack_state()["ids"]) == 3
+        browser.wait_until(lambda: cards(4) and pack_count(3))
         browser.wait_until(
             lambda: cdp.evaluate("document.querySelectorAll('[class*=st-key-card_bookmark_]').length===4")
         )
@@ -203,7 +298,7 @@ def main():
           return getComputedStyle(heading).fontSize===getComputedStyle(title.querySelector('p')).fontSize &&
             getComputedStyle(row).backgroundColor==='rgb(230, 230, 230)' &&
             getComputedStyle(menu).visibility==='visible' &&
-            Math.abs(a.top+a.height/2-b.top-b.height/2)<1 && b.right<=r.right+1 &&
+            Math.abs(a.top+a.height/2-b.top-b.height/2)<1 && r.right-b.right>=6 && b.left-a.right>=8 &&
             Math.abs(r.height-40)<1 && Math.abs(text.top+text.height/2-r.top-r.height/2)<1 &&
             row.scrollWidth<=row.clientWidth+1;
         }})()"""), cdp.evaluate(f"""(() => {{
@@ -230,6 +325,30 @@ def main():
             )
 
         assert menu_visibility(second["id"]) == "hidden"
+        assert cdp.evaluate(f"""(() => {{
+          const trigger=document.querySelector('.st-key-pack_options_{original['id']} button');
+          const arrow=trigger.querySelector('[data-testid=stIconMaterial]');
+          const selector=document.querySelector(
+            '.st-key-current_pack_choice_{original['id']}');
+          return getComputedStyle(arrow.parentElement.parentElement).display==='none' &&
+            !!selector.querySelector('svg');
+        }})()""")
+        check_management_menu(
+            f"manage_{first['id']}", [f"rename_{first['id']}", f"delete_{first['id']}"],
+            "research-management-menu.png",
+        )
+        check_management_menu(
+            f"pack_options_{original['id']}",
+            ["pack_manage_create", "pack_manage_rename", "pack_manage_delete"], "pack-management-menu.png",
+        )
+        check_arrow(f"current_pack_choice_{original['id']}")
+        click_key(f"result_filters_{first['id']}")
+        browser.wait_until(lambda: cdp.evaluate(
+            f"!!document.querySelector('.st-key-source_filter_{first['id']} input')"
+        ))
+        assert not cdp.evaluate("document.body.innerText.includes('Creative Category')")
+        check_arrow(f"source_filter_{first['id']}")
+        click_key(f"result_filters_{first['id']}")
         assert cdp.evaluate(f"""(() => {{
           const button=document.querySelector('.st-key-research_{first['id']} button');
           const r=button.getBoundingClientRect();
@@ -329,6 +448,7 @@ def main():
             abs(navigation_geometry("sidebar_new_research")["content_x"] - x) < 1 for x in caption_left
         )
         cdp.screenshot("sidebar-new-research-selected.png")
+        check_arrow("brief_sources")
         click_key("open_favorites")
         browser.wait_until(lambda: cards(2))
         print("Sidebar labels stay aligned; selected research/Favorites use neutral grey", flush=True)
