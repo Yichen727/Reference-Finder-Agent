@@ -207,6 +207,56 @@ def test_long_text_is_rejected_without_truncating_or_losing_the_saved_analysis(c
     )
 
 
+def test_expanded_annotation_word_targets_fit_one_slide_without_truncation(client):
+    run, _ = completed_run(client, count=4)
+    item = run["results"][0]
+    sections = {
+        "what_it_is": (
+            "An original brand film follows a local community as its members prepare for a shared event. "
+            "The story connects individual routines with a collective purpose, presenting the organisation "
+            "through recognisable people and places. Its factual premise and campaign context are documented "
+            "in the supplied project description. Credits remain source verified."
+        ),
+        "what_to_borrow": (
+            "Borrow the progression from individual activity to collective participation, rather than "
+            "copying the original setting. Start with recognisable behaviours that reflect the audience "
+            "in your brief, then connect them through a shared visual motif. This could give separate "
+            "contributors a clear narrative relationship while keeping the brand present through context. "
+            "Treat the motif and scene structure as proposed adaptations: the available evidence supports "
+            "the broader storytelling "
+            "principle, but does not establish the original camera setup, edit pattern or sound design."
+        ),
+        "why_it_fits": (
+            "This approach fits a community-focused introduction because it expresses identity through "
+            "people and everyday activity. It can connect an organisation's wider purpose to experiences "
+            "that its audience already recognises, rather than relying on generic claims. For the supplied "
+            "brief, the "
+            "useful connection is a personable tone and a collective message; practical production "
+            "requirements need separate confirmation. Audience response remains unmeasured."
+        ),
+    }
+    assert [len(value.split()) for value in sections.values()] == [50, 80, 60]
+    response = client.put(
+        f"/search-runs/{run['id']}/selection",
+        json={
+            "ordered_ids": [item["id"]],
+            "expected_version": 0,
+            "annotation_overrides": {item["id"]: {**item["annotation"], **sections}},
+        },
+    )
+    assert response.status_code == 200
+    record = export(client, run)
+    assert record.status_code == 201, record.text
+    downloaded = client.get(f"/exports/{record.json()['id']}/download")
+    slides = slides_from_bytes(downloaded.content)
+    assert len(slides) == 4  # One reference still occupies exactly one slide.
+    content = slide_text(slides[2])
+    for value in sections.values():
+        assert value in content
+    stored = client.get(f"/search-runs/{run['id']}").json()["selection"]["annotation_overrides"][item["id"]]
+    assert all(stored[field] == value for field, value in sections.items())
+
+
 def test_export_reuses_card_previews_in_the_matching_slide_image_areas(client, monkeypatch):
     run, chosen = selected_run(client)
     workflow, service = client.app.state.workflow, client.app.state.thumbnails

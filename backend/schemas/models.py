@@ -116,9 +116,24 @@ class Evidence(Model):
 
 
 class Annotation(Model):
-    what_it_is: Text
-    what_to_borrow: Text
-    why_it_fits: Text
+    what_it_is: Text = Field(
+        description=(
+            "Target 30-50 English words: verified work format, central subject and context. "
+            "Use fewer words when facts are sparse; never invent details or pad the description."
+        )
+    )
+    what_to_borrow: Text = Field(
+        description=(
+            "Target 50-80 English words: 2-3 concrete transferable principles and how to apply "
+            "them to this brief. Distinguish proposed adaptations from observed source facts."
+        )
+    )
+    why_it_fits: Text = Field(
+        description=(
+            "Target 40-60 English words: specific connections to the brief's objective, subject, "
+            "audience, tone, format or constraints. Avoid generic praise and repeated descriptions."
+        )
+    )
     production_note: Text
     assumptions: list[Text] = Field(default_factory=list, max_length=10)
     confidence: Literal["low", "medium", "high"] = "low"

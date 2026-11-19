@@ -84,6 +84,9 @@ values with `status`, `stop`, and `restart` as you used to start the app.
    it does not estimate time remaining. Results replace it when ready.
 2. **Browse the cards.** Each card shows a short description of the work. Use
    **View Details** for **What It Is**, **What to Borrow**, and **Why It Fits Your Brief**.
+   New research targets 30-50, 50-80 and 40-60 English words respectively, focusing on
+   verified context, actionable creative borrowing and specific brief relevance. Sparse
+   evidence can produce shorter analysis. Cards retain their compact description preview.
    The collapsed **Source & Rights** section retains source limitations, verification,
    evidence and rights notes. Use **Link** to open the original work. The filter icon beside
    **Reference Results** filters by source or creative category.
