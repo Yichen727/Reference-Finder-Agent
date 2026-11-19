@@ -810,4 +810,7 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    # The current UI uses global packs; keep the helpers and historical checks importable.
+    from scripts.verify_library_ui import main as verify_current_ui
+
+    verify_current_ui()

@@ -28,7 +28,9 @@ def area(app, label):
 
 @pytest.fixture
 def bridge(client, monkeypatch):
-    state = {"requests": [], "fail_export": False, "lose_submission": False, "race_export": False}
+    # Exercise the historical selection contract; global-library tests enable the new capability.
+    state = {"requests": [], "fail_export": False, "lose_submission": False,
+             "race_export": False, "global_library": False}
 
     def request(self, method, path, payload=None, *, binary=False):
         state["requests"].append((method, path, copy.deepcopy(payload)))
@@ -69,7 +71,10 @@ def bridge(client, monkeypatch):
         if response.is_error:
             detail = response.json()["error"]
             raise APIError(detail["message"], code=detail["code"], status=response.status_code)
-        return response.content if binary else response.json()
+        value = response.content if binary else response.json()
+        if path == "/health":
+            value["capabilities"]["global_library"] = state["global_library"]
+        return value
 
     monkeypatch.setattr(APIClient, "request", request)
     return state

@@ -100,9 +100,11 @@ values with `status`, `stop`, and `restart` as you used to start the app.
    **Cancel** closes the editor. Each batch retains its search parameters; reopening a saved
    research restores any pending update. Each search and pack allows up to 20 references,
    while additional batches can accumulate more cards in one research.
-3. **Click + to add a reference** to **Your Pack**. Click the checkmark to remove it.
-   Filtering does not remove selected references from your pack.
-4. **Drag items in Your Pack** into your preferred order. Use **x** to remove an item.
+3. **Bookmark references** to save them to **Favorites** in the sidebar. Use **+** to add a
+   reference to **Current Pack**, or the checkmark to remove it. Favorites and Packs are independent.
+4. **Combine references from different research or Favorites** in Current Pack. Use its selector
+   to switch Packs and **...** to create, rename or delete a named Pack. Drag items to reorder;
+   use **x** to remove one. Changes are saved immediately, and filtering does not change your Pack.
 5. **Click Export Reference Pack**, then **Download Reference Pack (.pptx)**.
    Export saves your selection and order. Each reference fills one template slide with
    its source, uppercase single-line title (54pt by default, reduced to fit),
@@ -110,6 +112,12 @@ values with `status`, `stop`, and `restart` as you used to start the app.
    plus a bold, underlined **ORIGINAL LINK HERE.** link.
    Your reference slides appear after the Base template's first two pages, before its
    original closing page. Four selected references produce seven slides.
+
+Favorites and named Packs survive restarts and deletion of the original research. Each saved
+reference retains its original analysis, brief, evidence and source link. Existing saved research
+selections are imported once as named Packs; original records and exports remain available.
+Stop the workspace before backing up `data/reference_finder.sqlite3`, which stores research,
+Favorites and Packs.
 
 Continue editing the downloaded file in PowerPoint. Source evidence, verification,
 production considerations, and rights notes are included in speaker notes. Each slide

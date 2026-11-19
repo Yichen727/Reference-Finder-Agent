@@ -251,10 +251,12 @@ def add_preview(package, shapes, relationships, part, preview):
     return True
 
 
-def notes_text(brief, run, item, annotation, preview, template_version):
+def notes_text(brief, run, item, annotation, preview, template_version, context=None):
+    context = context or {}
+    brief = context.get("brief", brief)
     lines = [
         f"Reference ID: {item.id}",
-        f"Research ID: {run.id}",
+        f"Research ID: {context.get('run_id', run.id)}",
         f"Selection version: {run.selection.version}",
         f"Template version: {template_version}",
         f"Original source: {item.source_url}",
@@ -265,6 +267,11 @@ def notes_text(brief, run, item, annotation, preview, template_version):
         f"Rights and usage: {annotation.rights_note}",
         f"Verification: {item.verification_status}; confidence: {annotation.confidence}",
     ]
+    if context.get("pack_id"):
+        lines.append(f"Pack: {context['pack_name']}; {context['pack_id']}")
+        lines.append(f"Original reference ID: {context['reference_id']}")
+        if context.get("batch_run_id"):
+            lines.append(f"Search batch ID: {context['batch_run_id']}")
     if item.page_check:
         lines.append(f"Source page: {item.page_check.status}. {item.page_check.reason}")
     lines.extend(f"Assumption: {value}" for value in annotation.assumptions)
@@ -277,11 +284,12 @@ def notes_text(brief, run, item, annotation, preview, template_version):
     if preview and preview.get("image"):
         lines.append(f"Image: {preview.get('source_url', '')}; {preview.get('basis', '')}")
     lines.extend(f"Alternate source: {url}" for url in item.alternate_urls)
-    lines.extend(f"Research limitation: {warning}" for warning in run.warnings)
+    lines.extend(f"Research limitation: {warning}" for warning in context.get("warnings", run.warnings))
     return lines
 
 
-def _render(path, brief, run, previews):
+def _render(path, brief, run, previews, contexts=None):
+    contexts = contexts or {}
     manifest = json.loads((TEMPLATE_DIR / "manifest.json").read_text(encoding="utf-8"))
     hashes = {
         name: hashlib.sha256((TEMPLATE_DIR / name).read_bytes()).hexdigest()
@@ -358,6 +366,7 @@ def _render(path, brief, run, previews):
                     annotation,
                     previews.get(item_id) if has_preview else None,
                     manifest["version"],
+                    contexts.get(item_id),
                 )
             ],
         )
@@ -392,11 +401,11 @@ def _render(path, brief, run, previews):
     return {"template_version": manifest["version"], "template_hashes": hashes}
 
 
-def render_pptx(path: Path, brief, run, previews=None):
+def render_pptx(path: Path, brief, run, previews=None, *, contexts=None):
     if not run.selection or not run.selection.ordered_ids:
         raise AppError("empty_selection", "Save at least one selected reference before exporting.", 422)
     try:
-        return _render(path, brief, run, previews or {})
+        return _render(path, brief, run, previews or {}, contexts)
     except AppError:
         raise
     except FileNotFoundError:

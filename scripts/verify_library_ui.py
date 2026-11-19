@@ -1,0 +1,322 @@
+"""Chrome acceptance for global favorites/packs with isolated data and no OpenAI calls."""
+
+import base64
+import json
+import os
+import shutil
+import subprocess
+import sys
+import tempfile
+import time
+from io import BytesIO
+from pathlib import Path
+from urllib.request import Request
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+
+from fastapi.testclient import TestClient  # noqa: E402
+from PIL import Image  # noqa: E402
+
+from backend.core.config import Settings  # noqa: E402
+from backend.main import create_app  # noqa: E402
+from backend.repositories.sqlite import Repository  # noqa: E402
+from scripts import verify_ui as browser  # noqa: E402
+from tests.fixtures import FixtureProvider  # noqa: E402
+from tests.pptx_helpers import slide_text, slides_from_bytes  # noqa: E402
+from tests.test_library import add, current, locator, research  # noqa: E402
+
+ARTIFACTS = Path(tempfile.gettempdir()) / "atomized-library-review" / str(time.time_ns())
+API, FRONTEND = "http://127.0.0.1:8110", "http://127.0.0.1:8611"
+
+
+def request(path, method="GET", payload=None, *, binary=False):
+    body = json.dumps(payload).encode() if payload is not None else None
+    req = Request(API + path, data=body, method=method, headers={"Content-Type": "application/json"})
+    with browser.OPENER.open(req, timeout=15) as response:
+        content = response.read()
+    return content if binary else json.loads(content)
+
+
+def seed(config):
+    with TestClient(create_app(config)) as client:
+        client.app.state.workflow.provider = FixtureProvider()
+        first, second = research(client), research(client, "second", distinct=True)
+        thumbnails = client.app.state.thumbnails
+        for run in (first, second):
+            for item in client.app.state.workflow.run(run["id"]).results:
+                image = BytesIO()
+                Image.new("RGB", (640, 360), "#607b78" if run is first else "#8c7766").save(image, "PNG")
+                thumbnails.store.save_preview(
+                    thumbnails.cache_key(item),
+                    {
+                        "image": "data:image/png;base64," + base64.b64encode(image.getvalue()).decode(),
+                        "source_url": "https://studio.test/fixture.png",
+                        "basis": "Offline test fixture",
+                    },
+                    3600,
+                )
+        favorites = [client.put("/favorites", json=locator(first, index)).json() for index in (0, 1)]
+        pack = current(client)
+        for run, index in ((first, 0), (second, 1), (first, 2)):
+            pack = add(client, pack, locator(run, index))
+        return first, second, favorites, pack
+
+
+def main():
+    ARTIFACTS.mkdir(parents=True)
+    browser.ARTIFACTS = ARTIFACTS
+    config = Settings(_env_file=None, data_dir=ARTIFACTS / "database", openai_api_key="test-only-key")
+    first, second, favorites, original = seed(config)
+    environment = {
+        **os.environ,
+        "DATA_DIR": str(config.data_dir),
+        "OPENAI_API_KEY": "test-only-key",
+        "PREVIEW_APPROVED_DOMAINS": "[]",
+        "BACKEND_URL": API,
+    }
+    processes, logs = [], []
+    cdp = None
+
+    def start(command, name):
+        log = (ARTIFACTS / f"{name}.log").open("w", encoding="utf-8")
+        logs.append(log)
+        processes.append(
+            subprocess.Popen(
+                command,
+                cwd=ROOT,
+                env=environment,
+                stdout=log,
+                stderr=log,
+                creationflags=subprocess.CREATE_NO_WINDOW,
+            )
+        )
+        (ARTIFACTS / "processes.json").write_text(
+            json.dumps([{"pid": process.pid, "command": process.args} for process in processes]),
+            encoding="utf-8",
+        )
+
+    def click_key(key):
+        selector = json.dumps(f".st-key-{key} button")
+        browser.wait_until(
+            lambda: cdp.evaluate(f"document.querySelector({selector})?.getBoundingClientRect().width>0")
+        )
+        cdp.evaluate(f"document.querySelector({selector}).click()")
+
+    def cards(count):
+        return cdp.evaluate(f"document.querySelectorAll('[class*=st-key-card_select_]').length==={count}")
+
+    def pack_count(count):
+        value = cdp.pack_state()
+        return value is not None and len(value["ids"]) == count
+
+    try:
+        start(
+            [sys.executable, "-m", "uvicorn", "backend.main:app", "--host", "127.0.0.1", "--port", "8110"],
+            "backend",
+        )
+        browser.wait_until(lambda: request("/health"))
+        assert request("/library")["current_pack"]["id"] == original["id"]
+        start(
+            [
+                sys.executable,
+                "-m",
+                "streamlit",
+                "run",
+                "frontend/app.py",
+                "--server.address",
+                "127.0.0.1",
+                "--server.port",
+                "8611",
+                "--server.headless",
+                "true",
+            ],
+            "frontend",
+        )
+        browser.wait_until(lambda: browser.OPENER.open(FRONTEND + "/_stcore/health", timeout=1).status == 200)
+        profile = ARTIFACTS / "chrome-profile"
+        start(
+            [
+                r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+                "--headless=new",
+                "--remote-debugging-port=0",
+                f"--user-data-dir={profile}",
+                "--no-first-run",
+                "--disable-gpu",
+                "--disable-background-networking",
+                "about:blank",
+            ],
+            "chrome",
+        )
+        port_file = profile / "DevToolsActivePort"
+        browser.wait_until(port_file.is_file)
+        port = port_file.read_text().splitlines()[0]
+        page = browser.wait_until(
+            lambda: next(
+                (p for p in browser.read_json(f"http://127.0.0.1:{port}/json/list") if p["type"] == "page"),
+                None,
+            )
+        )
+        cdp = browser.CDP(page["webSocketDebuggerUrl"])
+        cdp.call("Page.enable")
+        cdp.call(
+            "Emulation.setDeviceMetricsOverride", width=1440, height=1000, deviceScaleFactor=1, mobile=False
+        )
+        cdp.call("Page.navigate", url=FRONTEND + f"/?run={first['id']}")
+        browser.wait_until(lambda: cards(4) and cdp.pack_state() is not None)
+        assert len(cdp.pack_state()["ids"]) == 3
+        browser.wait_until(
+            lambda: cdp.evaluate("document.querySelectorAll('[class*=st-key-card_bookmark_]').length===4")
+        )
+        for item in first["results"]:
+            assert cdp.evaluate(f"""(() => {{
+              const card=document.querySelector('.st-key-reference_card_{item["id"]}');
+              const image=card.querySelector('.rf-preview').getBoundingClientRect();
+              const node=card.querySelector('[class*=st-key-card_bookmark_] button');
+              const button=node.getBoundingClientRect();
+              return button.width===36 && button.height===36 && button.left>=image.left &&
+                button.right<=image.right && button.top>=image.top && button.bottom<=image.bottom;
+            }})()""")
+        cdp.screenshot("research-desktop.png")
+        click_key("open_favorites")
+        browser.wait_until(lambda: cards(2))
+        click_key(f"pick_action_favorites_{favorites[1]['id']}")
+        browser.wait_until(lambda: pack_count(4))
+        click_key(f"favorite_favorites_{favorites[0]['id']}")
+        browser.wait_until(lambda: cards(1))
+        assert len(cdp.pack_state()["ids"]) == 4
+        request(f"/search-runs/{first['id']}", "DELETE")
+        cdp.call("Page.reload")
+        browser.wait_until(lambda: cards(1) and pack_count(4))
+        click_key(f"details_{favorites[1]['id']}")
+        browser.wait_until(lambda: cdp.evaluate("document.body.innerText.includes('Why It Fits Your Brief')"))
+        cdp.click("Done")
+        browser.wait_until(lambda: cdp.evaluate("!document.querySelector('[role=dialog]')"))
+        print("Bookmarks, Favorites cards and details survive deleting the original research", flush=True)
+        for width in (1440, 1024, 768, 390):
+            cdp.call(
+                "Emulation.setDeviceMetricsOverride",
+                width=width,
+                height=1000,
+                deviceScaleFactor=1,
+                mobile=False,
+            )
+            time.sleep(0.3)
+            assert cdp.evaluate("document.documentElement.scrollWidth<=innerWidth")
+            cdp.screenshot(f"favorites-{width}.png")
+        cdp.call(
+            "Emulation.setDeviceMetricsOverride", width=1440, height=1000, deviceScaleFactor=1, mobile=False
+        )
+        click_key(f"pack_options_{original['id']}")
+        click_key("pack_manage_create")
+        browser.wait_until(lambda: cdp.evaluate("!!document.querySelector('[role=dialog] input')"))
+        cdp.evaluate("document.querySelector('[role=dialog] input').focus()")
+        cdp.call("Input.insertText", text="Favorites Browser Pack")
+        cdp.call("Input.dispatchKeyEvent", type="keyDown", key="Tab", code="Tab", windowsVirtualKeyCode=9)
+        time.sleep(0.3)
+        click_key("submit_pack_management")
+        browser.wait_until(lambda: request("/library")["current_pack"]["name"] == "Favorites Browser Pack")
+        browser.wait_until(lambda: pack_count(0))
+        click_key(f"pick_action_favorites_{favorites[1]['id']}")
+        browser.wait_until(lambda: pack_count(1))
+        new_pack = request("/library")["current_pack"]
+        cdp.screenshot("pack-created-from-favorites.png")
+        select = f".st-key-current_pack_choice_{new_pack['id']} [role=combobox]"
+        point = cdp.evaluate(f"""(() => {{
+          const r=document.querySelector({json.dumps(select)}).getBoundingClientRect();
+          return {{x:r.left+r.width/2,y:r.top+r.height/2}};
+        }})()""")
+        cdp.call("Input.dispatchMouseEvent", type="mousePressed", button="left", clickCount=1, **point)
+        cdp.call("Input.dispatchMouseEvent", type="mouseReleased", button="left", clickCount=1, **point)
+        option = (
+            "[...document.querySelectorAll('[role=option]')]"
+            ".find(e=>e.innerText.trim()==='My Reference Pack')"
+        )
+        browser.wait_until(lambda: cdp.evaluate(f"!!({option})"))
+        cdp.evaluate(option + ".click()")
+        browser.wait_until(lambda: pack_count(4))
+        cdp.drag_pack(0, 3)
+        displayed = cdp.pack_state()["ids"]
+        browser.wait_until(lambda: request("/library")["current_pack"]["ordered_ids"] == displayed)
+        cdp.click("Export Reference Pack")
+        browser.wait_until(
+            lambda: cdp.evaluate("document.body.innerText.includes('Download Reference Pack (.pptx)')")
+        )
+        repo = Repository(config.data_dir / "reference_finder.sqlite3")
+        with repo.connection() as conn:
+            record = json.loads(
+                conn.execute(
+                    "SELECT payload FROM records WHERE kind='export' ORDER BY rowid DESC LIMIT 1"
+                ).fetchone()["payload"]
+            )
+        content = request(f"/exports/{record['id']}/download", binary=True)
+        pack = request("/library")["current_pack"]
+        for slide, reference_id in zip(slides_from_bytes(content)[2:-1], displayed, strict=True):
+            assert pack["references"][reference_id]["reference"]["title"].upper() in slide_text(slide)
+        (ARTIFACTS / "cross-research-pack.pptx").write_bytes(content)
+        (ARTIFACTS / "report.json").write_text(
+            json.dumps(
+                {
+                    "favorites_survive_research_deletion": True,
+                    "pack_order": displayed,
+                    "created_pack_id": new_pack["id"],
+                    "widths": [1440, 1024, 768, 390],
+                    "openai_calls": 0,
+                },
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+        print(
+            f"Pack creation, switching, actual drag and exact PPTX order passed. Artifacts: {ARTIFACTS}",
+            flush=True,
+        )
+    except Exception:
+        if cdp:
+            try:
+                cdp.screenshot("failure.png")
+                (ARTIFACTS / "failure-dom.json").write_text(
+                    json.dumps(
+                        cdp.evaluate("""({
+                  pack: document.querySelector('.st-key-pack_panel')?.outerHTML,
+                  options: [...document.querySelectorAll('[role=option]')].map(e=>e.innerText)
+                })""")
+                    ),
+                    encoding="utf-8",
+                )
+            except Exception:
+                pass
+        print(f"Browser check artifacts: {ARTIFACTS}", flush=True)
+        raise
+    finally:
+        if cdp:
+            cdp.connection.__exit__(None, None, None)
+        for process in reversed(processes):
+            if process.poll() is None:
+                subprocess.run(
+                    ["taskkill", "/PID", str(process.pid), "/T", "/F"],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    creationflags=subprocess.CREATE_NO_WINDOW,
+                )
+                try:
+                    process.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+                    try:
+                        process.wait(timeout=5)
+                    except subprocess.TimeoutExpired:
+                        print(f"Test process {process.pid} could not be stopped", flush=True)
+        for log in logs:
+            log.close()
+        profile = ARTIFACTS / "chrome-profile"
+        if profile.exists():
+            if not ARTIFACTS.resolve().is_relative_to(Path(tempfile.gettempdir()).resolve()):
+                raise RuntimeError("Unexpected temporary artifact path")
+            if profile.resolve().parent != ARTIFACTS.resolve():
+                raise RuntimeError("Unexpected Chrome profile path")
+            shutil.rmtree(profile, ignore_errors=True)
+
+
+if __name__ == "__main__":
+    main()

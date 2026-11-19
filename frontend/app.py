@@ -6,7 +6,7 @@ from uuid import uuid4
 import streamlit as st
 
 from config import current_source_name
-from frontend import layout
+from frontend import layout, library
 from frontend.api_client import APIClient, APIError
 from frontend.curation import EDIT_FIELDS, apply_pack_action, draft_from_run, selection_payload
 from frontend.pack_component import pack_list
@@ -59,6 +59,9 @@ def remove_reference(run_id: str, item_id: str):
 
 
 def toggle_reference(run_id: str, item_id: str):
+    if library.enabled():
+        library.toggle_pack(run_id, item_id)
+        return
     key = f"pick_{run_id}_{item_id}"
     order = st.session_state["pack_drafts"][run_id]["ordered_ids"]
     st.session_state[key] = item_id not in order
@@ -76,6 +79,8 @@ def pack_action(run_id: str, key: str):
 
 
 def exclude_reference(run_id: str, item_id: str):
+    if library.enabled() and library.is_selected(run_id, item_id):
+        library.toggle_pack(run_id, item_id)
     draft = st.session_state["pack_drafts"][run_id]
     rejected = draft.setdefault("rejected_ids", [])
     if item_id not in rejected:
@@ -131,6 +136,9 @@ def activate_run(run_id: str, *, reload_saved=False):
         st.session_state.setdefault("pack_downloads", {}).pop(run_id, None)
         st.session_state.pop("conflict_run", None)
     st.session_state.update(run_id=run_id, run=run, brief=brief)
+    st.session_state["view"] = "research"
+    st.query_params.pop("view", None)
+    library.close_management()
     restore_operation(run_id)
     st.session_state["recent_runs"] = client.request("GET", "/search-runs")
     close_detail()
@@ -140,6 +148,8 @@ def activate_run(run_id: str, *, reload_saved=False):
 
 
 def new_research():
+    st.session_state["view"] = "research"
+    library.close_management()
     close_detail()
     close_management()
     for key in ["run_id", "run", "brief", "pending_research", "last_error"]:
@@ -147,6 +157,13 @@ def new_research():
     st.query_params.clear()
     st.session_state.pop("workspace_health", None)
     st.session_state.pop("recent_runs", None)
+
+
+def show_favorites():
+    new_research()
+    st.session_state["view"] = "favorites"
+    st.query_params["view"] = "favorites"
+    library.refresh()
 
 
 def display_error(error: APIError):
@@ -183,6 +200,13 @@ def sidebar():
     with st.sidebar:
         st.caption("ATOMIZED STUDIOS")
         st.button("New Research", icon=":material/edit_square:", on_click=new_research, width="stretch")
+        if library.enabled():
+            favorite_count = len(library.state()["favorites"])
+            st.button(
+                f"Favorites ({favorite_count})", icon=":material/bookmark:", key="open_favorites",
+                on_click=show_favorites, width="stretch",
+                type="primary" if st.session_state.get("view") == "favorites" else "tertiary",
+            )
         if "recent_runs" not in st.session_state:
             st.session_state["recent_runs"] = client.request("GET", "/search-runs")
         recent = st.session_state["recent_runs"]
@@ -494,6 +518,17 @@ def presentation_for(run):
 def reference_card(run, item, draft, previews):
     run_id, item_id = run["id"], item["id"]
     with st.container(border=True, key=f"reference_card_{item_id}"):
+        if library.enabled():
+            favorite = library.is_favorite(run_id, item_id)
+            with st.container(key=f"card_bookmark_{item_id}"):
+                st.button(
+                    "Remove from Favorites" if favorite else "Add to Favorites",
+                    icon=":material/bookmark:" if favorite else ":material/bookmark_add:",
+                    type="primary" if favorite else "secondary", width=36,
+                    key=f"favorite_{run_id}_{item_id}", disabled=library.blocked(),
+                    help="Remove from Favorites" if favorite else "Add to Favorites",
+                    on_click=library.toggle_favorite, args=(run_id, item_id),
+                )
         st.html(layout.preview_markup(previews.get(item_id), item["title"]))
         st.markdown(f"#### {item['title']}")
         st.caption(f"{item['platform']} / {item['strand']}")
@@ -520,7 +555,8 @@ def reference_card(run, item, draft, previews):
                 width="stretch",
                 help="Open the original source in a new tab",
             )
-            selected = item_id in draft["ordered_ids"]
+            selected = (library.is_selected(run_id, item_id)
+                        if library.enabled() else item_id in draft["ordered_ids"])
             with selection.container(key=f"card_select_{item_id}"):
                 st.button(
                     "Remove from Pack" if selected else "Add to Pack",
@@ -528,7 +564,8 @@ def reference_card(run, item, draft, previews):
                     key=f"pick_action_{run_id}_{item_id}",
                     width=40,
                     type="primary" if selected else "secondary",
-                    disabled=not selected and len(draft["ordered_ids"]) >= st.session_state[
+                    disabled=(library.blocked() or (not selected and library.pack_full()))
+                    if library.enabled() else not selected and len(draft["ordered_ids"]) >= st.session_state[
                         "workspace_health"]["max_references"],
                     help="Remove from Pack" if selected else "Add to Pack",
                     on_click=toggle_reference,
@@ -547,12 +584,14 @@ def reference_details(run, item):
     st.html(layout.preview_markup(preview, item["title"]))
     original, selection = st.columns(2)
     original.link_button("Open Link", item["source_url"], width="stretch")
-    selected = item_id in draft_for(run)["ordered_ids"]
+    selected = (library.is_selected(run_id, item_id)
+                if library.enabled() else item_id in draft_for(run)["ordered_ids"])
     if selection.button(
         "Remove from Pack" if selected else "Add to Pack",
         key=f"detail_select_{item_id}",
         width="stretch",
-        disabled=not selected and len(draft_for(run)["ordered_ids"]) >= st.session_state[
+        disabled=(library.blocked() or (not selected and library.pack_full()))
+        if library.enabled() else not selected and len(draft_for(run)["ordered_ids"]) >= st.session_state[
             "workspace_health"]["max_references"],
         on_click=toggle_reference,
         args=(run_id, item_id),
@@ -594,7 +633,7 @@ def reference_details(run, item):
     if done.button("Done", type="primary", width="stretch"):
         close_detail()
         st.rerun()
-    if exclude.button(
+    if run_id != "favorites" and exclude.button(
         "Exclude Reference",
         key=f"exclude_{item_id}",
         width="stretch",
@@ -635,7 +674,10 @@ def export_pack(run: dict, draft: dict):
 
 
 def selection_panel(run, draft):
-    st.subheader(f"Your Pack ({len(draft['ordered_ids'])})", anchor="your-pack")
+    if library.enabled():
+        library.render_current_pack()
+        return
+    st.subheader(f"Current Pack ({len(draft['ordered_ids'])})", anchor="your-pack")
     by_id = {item["id"]: item for item in run["results"]}
     st.caption("Drag a row to reorder")
     key = f"pack_sort_{run['id']}"
@@ -702,6 +744,8 @@ def result_filters(run, draft, active_filters):
 
 def result_panel():
     run = st.session_state["run"]
+    if library.enabled():
+        library.ensure(run)
     if run.get("mode") != "live":
         st.info("This archived demonstration is read-only. Start new research to find current references.")
         return
@@ -727,7 +771,7 @@ def result_panel():
     finally:
         if area is not None:
             area.empty()
-    st.html('<a class="rf-pack-shortcut" href="#your-pack">View Your Pack</a>')
+    st.html('<a class="rf-pack-shortcut" href="#your-pack">View Current Pack</a>')
     with st.container(key="research_workspace"):
         results, pack = st.columns([7, 3], gap="medium")
         with results, st.container(key="reference_results", gap="xsmall"):
@@ -783,15 +827,36 @@ def result_panel():
                 st.info(
                     "No references match these filters. Adjust the filters or restore excluded references."
                 )
-            for start in range(0, len(visible), 2):
-                with st.container(key=f"reference_grid_{start}"):
-                    columns = st.columns(2, gap="small")
-                    for column, item in zip(columns, visible[start : start + 2]):
-                        with column:
-                            reference_card(run, item, draft, presentation["previews"])
+            reference_grid(run, visible, draft, presentation["previews"])
         with pack:
             with st.container(key="pack_panel", border=True):
                 selection_panel(run, draft)
+
+
+def reference_grid(run, items, draft, previews):
+    for start in range(0, len(items), 2):
+        with st.container(key=f"reference_grid_{start}"):
+            columns = st.columns(2, gap="small")
+            for column, item in zip(columns, items[start:start + 2]):
+                with column:
+                    reference_card(run, item, draft, previews)
+
+
+def favorites_panel():
+    run = library.favorites_context()
+    draft = draft_for(run)
+    previews = library.favorites_previews()
+    st.session_state.setdefault("presentations", {})["favorites"] = {"previews": previews}
+    with st.container(key="research_workspace"):
+        results, pack = st.columns([7, 3], gap="medium")
+        with results:
+            st.subheader("Favorites")
+            st.caption(f"{len(run['results'])} saved references")
+            if not run["results"]:
+                st.caption("Bookmark a reference from any research to save it here.")
+            reference_grid(run, run["results"], draft, previews)
+        with pack, st.container(key="pack_panel", border=True):
+            selection_panel(run, draft)
 
 
 def main():
@@ -805,6 +870,8 @@ def main():
         health = st.session_state["workspace_health"]
         if "mode" not in health or "max_references" not in health:
             raise APIError("This service is not the Reference Finder backend.")
+        if st.query_params.get("view") == "favorites" and library.enabled():
+            st.session_state["view"] = "favorites"
         if not st.session_state.get("run_id") and st.query_params.get("run"):
             try:
                 activate_run(st.query_params["run"])
@@ -812,7 +879,9 @@ def main():
                 st.query_params.clear()
                 st.warning("That saved research is unavailable. Start a new search below.")
         sidebar()
-        if st.session_state.get("pending_research"):
+        if st.session_state.get("view") == "favorites" and library.enabled():
+            favorites_panel()
+        elif st.session_state.get("pending_research"):
             resume_search()
         elif st.session_state.get("run"):
             result_panel()
@@ -820,7 +889,11 @@ def main():
             brief_form(health)
         detail = st.session_state.get("active_detail")
         run = st.session_state.get("run")
-        if st.session_state.get("research_management"):
+        if st.session_state.get("view") == "favorites" and library.enabled():
+            run = library.favorites_context()
+        if st.session_state.get("pack_management"):
+            library.management_dialog()
+        elif st.session_state.get("research_management"):
             management_dialog()
         elif detail and run and detail[0] == run["id"]:
             item = next((item for item in run["results"] if item["id"] == detail[1]), None)

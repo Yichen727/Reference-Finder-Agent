@@ -55,6 +55,15 @@ embeds full videos, downloads uncached images, or calls OpenAI.
 
 ## API and compatibility
 
+Named Current Packs combine snapshots from multiple research sessions or Favorites.
+`POST /packs/{id}/exports/pptx` requires `expected_version` and exports the exact persisted
+order. Each slide retains the chosen research's analysis, original brief, evidence, links
+and cached image, including the edited brief of an additional search batch. Research and
+reference IDs remain in speaker notes. Deleting original research does not prevent these
+exports; removing a Pack leaves existing exported files available.
+
+Historical research-selection export endpoints below remain supported.
+
 - `POST /search-runs/{id}/exports/pptx` accepts the existing
   `expected_selection_version` field and returns an export record.
 - The record includes `format`, `selection_version`, `template_version`, and both

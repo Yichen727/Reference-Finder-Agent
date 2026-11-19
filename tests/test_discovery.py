@@ -467,8 +467,8 @@ def test_live_frontend_can_search_curate_and_export(settings, discovery_api, mon
         choices[0].click().run()
         next(item for item in app.button if item.label == "Export Reference Pack").click().run()
         assert not app.exception
-        run_id = app.session_state["run_id"]
-        assert app.session_state["pack_downloads"][run_id]["content"].startswith(b"PK")
+        pack_id = app.session_state["library_state"]["current_pack"]["id"]
+        assert app.session_state["library_downloads"][pack_id]["content"].startswith(b"PK")
 
 
 def test_url_cleanup_preserves_access_and_video_identifiers():

@@ -332,6 +332,7 @@ class SearchRun(Model):
 class ExportRecord(Model):
     id: str = Field(default_factory=new_id)
     run_id: str
+    pack_id: str | None = None
     selection_version: int
     filename: str
     format: Literal["docx", "pptx"] = "docx"

@@ -9,6 +9,7 @@ from starlette.exceptions import HTTPException
 
 from backend.core.config import Settings
 from backend.core.errors import AppError
+from backend.library_routes import register_library_routes
 from backend.providers.openai_provider import OpenAIProvider
 from backend.repositories.sqlite import Repository
 from backend.schemas.models import (
@@ -26,6 +27,7 @@ from backend.schemas.models import (
     StoredBrief,
 )
 from backend.schemas.source_registry import SourceCategoryMetadata
+from backend.services.library import ReferenceLibrary
 from backend.services.pptx_export import PPTX_MIME
 from backend.services.presentation import PresentationStore
 from backend.services.source_registry import load_source_registry
@@ -39,17 +41,21 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     workflow = Workflow(config, repo)
     presentation = PresentationStore(repo)
     thumbnails = ThumbnailService(config, presentation)
+    library = ReferenceLibrary(workflow, thumbnails)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         repo.initialize()
         presentation.initialize()
+        library.initialize()
         yield
 
     app = FastAPI(title="Atomized Reference Finder", version="0.1.0", lifespan=lifespan)
     app.state.workflow = workflow
     app.state.thumbnails = thumbnails
     app.state.presentation = presentation
+    app.state.library = library
+    register_library_routes(app, library)
 
     @app.exception_handler(AppError)
     async def application_error(request: Request, error: AppError):
@@ -121,6 +127,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 "live_strategy": config.openai_configured,
                 "live_search": config.search_configured,
                 "background_planning": True,
+                "global_library": True,
             },
         }
 
@@ -238,7 +245,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.get("/exports/{export_id}/download")
     def download_export(export_id: UUID):
         record = ExportRecord.model_validate(repo.get("export", str(export_id)))
-        repo.get("run", record.run_id)
+        if record.pack_id is None:
+            repo.get("run", record.run_id)
         path = config.data_dir / "exports" / record.filename
         if not path.is_file():
             raise AppError("export_missing", "Export file is missing; generate it again.", 404)

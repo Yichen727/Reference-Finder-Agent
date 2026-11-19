@@ -74,6 +74,17 @@
 [role="dialog"] .rf-preview { max-width: 24rem; margin-inline: auto; }
 .rf-placeholder { color: #77736a; font: 13px sans-serif; text-align: center; }
 .rf-placeholder span { display: block; margin-bottom: .4rem; font-size: 26px; opacity: .6; }
+[class*="st-key-reference_card_"] { position: relative; }
+[class*="st-key-card_bookmark_"] {
+  position: absolute; top: 30px; left: 22px; width: 36px !important; z-index: 2;
+}
+[class*="st-key-card_bookmark_"] button {
+  width: 36px; min-width: 36px; height: 36px; min-height: 36px; padding: 0; border-radius: 50%;
+}
+[class*="st-key-card_bookmark_"] button [data-testid="stMarkdownContainer"] {
+  position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%);
+}
+.st-key-open_favorites button > div { width: 100%; justify-content: flex-start !important; }
 .st-key-pack_panel h3 { font-size: 1.2rem; }
 .rf-pack-shortcut { display: none; }
 @media (min-width: 1101px) {

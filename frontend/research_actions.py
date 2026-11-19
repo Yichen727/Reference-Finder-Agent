@@ -193,7 +193,7 @@ def render_editor(run, categories_loader, activate_run):
             key=prefix + count_field, disabled=bool(pending),
         ))
         st.caption(
-            "Existing cards, exclusions and Your Pack will be preserved."
+            "Existing cards, exclusions and Current Pack will be preserved."
             if mode == "Add" else
             "A new research version will be created. Your previous research and pack remain saved."
         )
