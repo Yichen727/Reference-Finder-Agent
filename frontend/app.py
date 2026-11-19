@@ -196,60 +196,71 @@ def display_error(error: APIError):
         st.error("We could not complete that request. Please try again. Your current edits are kept.")
 
 
+def toggle_recent_research():
+    collapsed = st.session_state.get("recent_research_collapsed", False)
+    st.session_state["recent_research_collapsed"] = not collapsed
+
+
 def sidebar():
     with st.sidebar:
         st.caption("ATOMIZED STUDIOS")
-        st.button("New Research", icon=":material/edit_square:", on_click=new_research, width="stretch")
+        st.button(
+            "New Research", icon=":material/edit_square:", key="sidebar_new_research",
+            icon_position="left", on_click=new_research, width="stretch",
+            type="primary" if not st.session_state.get("run_id")
+            and st.session_state.get("view") != "favorites" else "tertiary",
+        )
         if library.enabled():
             favorite_count = len(library.state()["favorites"])
             st.button(
                 f"Favorites ({favorite_count})", icon=":material/bookmark:", key="open_favorites",
-                on_click=show_favorites, width="stretch",
+                icon_position="left", on_click=show_favorites, width="stretch",
                 type="primary" if st.session_state.get("view") == "favorites" else "tertiary",
             )
         if "recent_runs" not in st.session_state:
             st.session_state["recent_runs"] = client.request("GET", "/search-runs")
         recent = st.session_state["recent_runs"]
         recent = [item for item in recent if item.get("mode") == "live"]
-        st.caption("RECENT RESEARCH")
-        if recent:
-            with st.container(key="recent_research"):
+        collapsed = st.session_state.get("recent_research_collapsed", False)
+        with st.container(key="recent_research_heading"):
+            st.button(
+                "RECENT RESEARCH",
+                icon=":material/chevron_right:" if collapsed else ":material/expand_more:",
+                icon_position="right", key="toggle_recent_research", type="tertiary", width="content",
+                on_click=toggle_recent_research,
+            )
+        if recent and not collapsed:
+            with st.container(key="recent_research", gap="xxsmall"):
                 for item in recent:
                     active = item["id"] == st.session_state.get("run_id")
                     title = item.get("title") or item["summary"][:48]
-                    title_column, menu_column = st.columns([5, 1], gap="xxsmall", wrap=False)
-                    if title_column.button(
-                        title,
-                        key=f"research_{item['id']}",
-                        width="stretch",
-                        type="primary" if active else "tertiary",
-                        help=f"{title} · {item['created_at'][:10]}",
-                    ):
-                        activate_run(item["id"])
-                        st.rerun()
-                    with menu_column.popover(
-                        "...",
-                        key=f"manage_{item['id']}",
-                        help=f"Manage {title}",
-                        type="tertiary",
-                        width="stretch",
-                    ):
-                        st.button(
-                            "Rename",
-                            key=f"rename_{item['id']}",
-                            width="stretch",
-                            on_click=open_management,
-                            args=("rename", item["id"], title),
+                    with st.container(key=f"recent_row_{item['id']}"):
+                        title_column, menu_column = st.columns(
+                            [5, 1], gap="xxsmall", wrap=False, vertical_alignment="center",
                         )
-                        st.button(
-                            "Delete",
-                            key=f"delete_{item['id']}",
-                            width="stretch",
-                            help="Delete research after confirmation. Running searches must finish first.",
-                            on_click=open_management,
-                            args=("delete", item["id"], title),
-                        )
-        else:
+                        if title_column.button(
+                            title,
+                            key=f"research_{item['id']}",
+                            width="stretch", wrap=False,
+                            type="primary" if active else "tertiary",
+                            help=f"{title} · {item['created_at'][:10]}",
+                        ):
+                            activate_run(item["id"])
+                            st.rerun()
+                        with menu_column.popover(
+                            "⋯", key=f"manage_{item['id']}", help=f"Manage {title}",
+                            type="tertiary", width="stretch",
+                        ):
+                            st.button(
+                                "Rename", key=f"rename_{item['id']}", width="stretch",
+                                on_click=open_management, args=("rename", item["id"], title),
+                            )
+                            st.button(
+                                "Delete", key=f"delete_{item['id']}", width="stretch",
+                                help="Confirm deletion after any running search finishes.",
+                                on_click=open_management, args=("delete", item["id"], title),
+                            )
+        elif not collapsed:
             st.caption("No saved research yet.")
 
 

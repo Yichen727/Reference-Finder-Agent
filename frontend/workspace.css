@@ -1,12 +1,103 @@
 .stMainBlockContainer { padding: 4.5rem 2rem 4rem; }
 .st-key-research_workspace { --rf-border: #dedbd6; }
-.st-key-recent_research button { justify-content: flex-start; text-align: left; }
-.st-key-recent_research button p { text-align: left !important; width: 100%; }
-.st-key-recent_research button > div { width: 100%; justify-content: flex-start !important; }
-.st-key-recent_research button[kind="primary"] {
-  color: #25231f; background: #e8e5df; border-color: transparent;
+:is(.st-key-sidebar_new_research, .st-key-open_favorites,
+    .st-key-recent_research [class*="st-key-research_"]) button {
+  display: flex; align-items: center; justify-content: flex-start; text-align: left;
+  box-sizing: border-box; min-height: 40px; padding: 0 0 0 10px !important;
+  margin-left: -10px; width: calc(100% + 10px) !important;
+  border: 0 !important; border-radius: 8px;
+  color: #25231f; background: transparent; font-size: 14px; font-weight: 400;
+}
+:is(.st-key-sidebar_new_research, .st-key-open_favorites,
+    .st-key-recent_research [class*="st-key-research_"]) button > div {
+  width: 100%; justify-content: flex-start !important; gap: 8px;
+}
+:is(.st-key-sidebar_new_research, .st-key-open_favorites,
+    .st-key-recent_research [class*="st-key-research_"]) button p {
+  margin: 0; padding: 0; text-align: left !important; color: inherit;
+  font-size: 14px; font-weight: 400;
+}
+:is(.st-key-sidebar_new_research, .st-key-open_favorites,
+    .st-key-recent_research [class*="st-key-research_"]) button[kind="primary"] {
+  color: #25231f; background: #e6e6e6;
+}
+:is(.st-key-sidebar_new_research, .st-key-open_favorites,
+    .st-key-recent_research [class*="st-key-research_"]) button:hover {
+  color: #25231f; background: #eeeeee;
+}
+:is(.st-key-sidebar_new_research, .st-key-open_favorites,
+    .st-key-recent_research [class*="st-key-research_"]) button[kind="primary"]:hover {
+  background: #e2e2e2;
+}
+.st-key-recent_research { margin-left: -10px; width: calc(100% + 10px) !important; max-width: none; }
+.st-key-recent_research [class*="st-key-research_"] button {
+  margin-left: 0; width: 100% !important;
 }
 .st-key-recent_research [data-testid="stColumn"] { min-width: 0 !important; }
+.st-key-recent_research [class*="st-key-recent_row_"] {
+  height: 40px; min-height: 40px; border-radius: 8px; overflow: clip;
+}
+.st-key-recent_research [class*="st-key-recent_row_"] [data-testid="stHorizontalBlock"] {
+  display: grid !important; grid-template-columns: minmax(0, 1fr) 32px;
+  gap: 4px !important; align-items: center; width: 100%; height: 40px;
+  margin: 0; padding: 0; overflow: visible;
+}
+.st-key-recent_research [class*="st-key-recent_row_"] [data-testid="stColumn"] {
+  width: 100% !important; min-width: 0 !important; flex: none !important;
+}
+.st-key-recent_research [class*="st-key-research_"] button {
+  height: 40px; min-height: 40px;
+}
+.st-key-recent_research [class*="st-key-research_"] button p {
+  display: block; line-height: 20px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.st-key-recent_research [class*="st-key-recent_row_"]:hover { background: #eeeeee; }
+.st-key-recent_research [class*="st-key-recent_row_"]:has(button[kind="primary"]) { background: #e6e6e6; }
+.st-key-recent_research [class*="st-key-recent_row_"]:has(button[kind="primary"]):hover { background: #e2e2e2; }
+.st-key-recent_research [class*="st-key-research_"] button,
+.st-key-recent_research [class*="st-key-manage_"] [data-testid="stPopoverButton"] {
+  background: transparent !important;
+}
+.st-key-recent_research [class*="st-key-manage_"] { visibility: hidden; }
+.st-key-recent_research [class*="st-key-recent_row_"]:has(button[kind="primary"]) [class*="st-key-manage_"] {
+  visibility: visible;
+}
+.st-key-recent_research [class*="st-key-manage_"] [data-testid="stPopoverButton"] {
+  height: 40px; min-height: 40px; padding: 0; border: 0;
+  box-sizing: border-box; overflow: clip;
+  display: flex; align-items: center; justify-content: center; color: #57534e;
+}
+.st-key-recent_research [class*="st-key-manage_"] [data-testid="stPopoverButton"] p {
+  display: block; margin: 0; font-size: 18px; line-height: 20px;
+}
+.st-key-recent_research [class*="st-key-manage_"] [data-testid="stPopoverButton"] > div {
+  width: 100%; min-width: 0; display: flex; justify-content: center; gap: 0;
+}
+.st-key-recent_research [class*="st-key-manage_"] [data-testid="stMarkdownContainer"] {
+  font-size: 18px; line-height: 20px;
+}
+.st-key-recent_research [class*="st-key-manage_"] [data-testid="stPopoverButton"] > div > [aria-hidden="true"] {
+  display: none;
+}
+.st-key-recent_research_heading { overflow: visible; }
+.st-key-toggle_recent_research [data-testid="stIconMaterial"] {
+  opacity: 0; transition: opacity .12s ease;
+}
+.st-key-recent_research_heading:hover [data-testid="stIconMaterial"],
+.st-key-recent_research_heading:focus-within [data-testid="stIconMaterial"] { opacity: 1; }
+.st-key-toggle_recent_research button {
+  height: 24px; min-height: 24px; padding: 0; border: 0;
+  color: #77736a; background: transparent;
+}
+.st-key-toggle_recent_research button:hover,
+.st-key-toggle_recent_research button:active { color: #57534e; background: transparent; }
+.st-key-toggle_recent_research button [data-has-shortcut] { justify-content: flex-start; gap: 4px; }
+.st-key-toggle_recent_research button p {
+  margin: 0; padding: 0; font-size: 14px; line-height: 20px; font-weight: 400;
+}
+@media (hover: none) {
+  .st-key-toggle_recent_research [data-testid="stIconMaterial"] { opacity: 1; }
+}
 .st-key-recent_research [data-testid="stPopoverButton"] { min-width: 28px; }
 .st-key-recent_research [class*="st-key-manage_"] svg,
 .st-key-recent_research [class*="st-key-manage_"] [data-testid="stIconMaterial"] { display: none; }
@@ -84,7 +175,6 @@
 [class*="st-key-card_bookmark_"] button [data-testid="stMarkdownContainer"] {
   position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%);
 }
-.st-key-open_favorites button > div { width: 100%; justify-content: flex-start !important; }
 .st-key-pack_panel h3 { font-size: 1.2rem; }
 .rf-pack-shortcut { display: none; }
 @media (min-width: 1101px) {

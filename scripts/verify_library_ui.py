@@ -178,8 +178,160 @@ def main():
                 button.right<=image.right && button.top>=image.top && button.bottom<=image.bottom;
             }})()""")
         cdp.screenshot("research-desktop.png")
+        def navigation_geometry(key):
+            return cdp.evaluate(f"""(() => {{
+              const button=document.querySelector('.st-key-'+{json.dumps(key)}+' button');
+              const label=button.querySelector('p');
+              const style=getComputedStyle(button);
+              const row=button.closest('[class*=st-key-recent_row_]');
+              return {{x:label.getBoundingClientRect().left,
+                background:getComputedStyle(row||button).backgroundColor,
+                content_x:button.firstElementChild.getBoundingClientRect().left,
+                button_x:button.getBoundingClientRect().left,
+                border:style.borderLeftWidth, weight:getComputedStyle(label).fontWeight}};
+            }})()""")
+
+        active_title = navigation_geometry(f"research_{first['id']}")
+        assert cdp.evaluate(f"""(() => {{
+          const row=document.querySelector('.st-key-recent_row_{first['id']}');
+          const title=row.querySelector('.st-key-research_{first['id']} button');
+          const menu=row.querySelector('.st-key-manage_{first['id']} button');
+          const a=title.getBoundingClientRect(), b=menu.getBoundingClientRect();
+          const r=row.getBoundingClientRect();
+          const text=title.querySelector('p').getBoundingClientRect();
+          const heading=document.querySelector('.st-key-toggle_recent_research p');
+          return getComputedStyle(heading).fontSize===getComputedStyle(title.querySelector('p')).fontSize &&
+            getComputedStyle(row).backgroundColor==='rgb(230, 230, 230)' &&
+            getComputedStyle(menu).visibility==='visible' &&
+            Math.abs(a.top+a.height/2-b.top-b.height/2)<1 && b.right<=r.right+1 &&
+            Math.abs(r.height-40)<1 && Math.abs(text.top+text.height/2-r.top-r.height/2)<1 &&
+            row.scrollWidth<=row.clientWidth+1;
+        }})()"""), cdp.evaluate(f"""(() => {{
+          const row=document.querySelector('.st-key-recent_row_{first['id']}');
+          return [row,...row.querySelectorAll('*')].filter(e=>e===row ||
+            e.tagName==='BUTTON' || e.tagName==='P' ||
+            e.scrollWidth>e.clientWidth+1 &&
+              ['auto','scroll'].includes(getComputedStyle(e).overflowX)).map(e=>({{
+            tag:e.tagName,key:e.className,box:e.getBoundingClientRect().toJSON(),
+            scroll:e.scrollWidth,client:e.clientWidth,overflow:getComputedStyle(e).overflow
+          }}));
+        }})()""")
+        assert cdp.evaluate("""(() => {
+          const rows=[...document.querySelectorAll('[class*=st-key-recent_row_]')];
+          const rects=rows.map(e=>e.getBoundingClientRect());
+          return rects.every((r,i)=>i===0 || Math.abs(r.top-rects[i-1].bottom-4)<1) &&
+            rows.every(row=>[row,...row.querySelectorAll('*')].every(e=>
+              !['auto','scroll'].includes(getComputedStyle(e).overflowX) ||
+              e.scrollWidth<=e.clientWidth+1 || e.clientHeight===0));
+        })()""")
+        def menu_visibility(run_id):
+            return cdp.evaluate(
+                f"getComputedStyle(document.querySelector('.st-key-manage_{run_id}')).visibility"
+            )
+
+        assert menu_visibility(second["id"]) == "hidden"
+        assert cdp.evaluate(f"""(() => {{
+          const button=document.querySelector('.st-key-research_{first['id']} button');
+          const r=button.getBoundingClientRect();
+          return button.contains(document.elementFromPoint(r.left+5,r.top+r.height/2));
+        }})()"""), cdp.evaluate(f"""(() => {{
+          let node=document.querySelector('.st-key-research_{first['id']} button');
+          const ancestors=[];
+          while(node) {{
+            const r=node.getBoundingClientRect(), s=getComputedStyle(node);
+            ancestors.push({{tag:node.tagName,key:node.className,x:r.left,width:r.width,overflow:s.overflow}});
+            node=node.parentElement;
+          }}
+          return ancestors;
+        }})()""")
+        def heading_geometry():
+            return cdp.evaluate("""(() => {
+              const heading=document.querySelector('.st-key-recent_research_heading');
+              const r=heading.querySelector('p').getBoundingClientRect();
+              const scrolling=[heading,...heading.querySelectorAll('*')].filter(e=>
+                ['auto','scroll'].includes(getComputedStyle(e).overflowY) &&
+                e.scrollHeight>e.clientHeight+1 && e.clientWidth>0);
+              return {top:r.top,height:r.height,scrollbars:scrolling.length};
+            })()""")
+
+        before_heading = heading_geometry()
+        assert before_heading["scrollbars"] == 0
+        heading_point = cdp.evaluate("""(() => {
+          const r=document.querySelector('.st-key-recent_research_heading').getBoundingClientRect();
+          return {x:r.left+10,y:r.top+r.height/2};
+        })()""")
+        cdp.call("Input.dispatchMouseEvent", type="mouseMoved", **heading_point)
+        browser.wait_until(lambda: cdp.evaluate(
+            "getComputedStyle(document.querySelector('.st-key-toggle_recent_research "
+            "[data-testid=stIconMaterial]')).opacity==='1'"
+        ))
+        assert not cdp.evaluate("""[...document.querySelectorAll('[role=tooltip]')].some(e=>
+          /expand recent research|collapse recent research/i.test(e.innerText))""")
+        click_key("toggle_recent_research")
+        browser.wait_until(lambda: cdp.evaluate("!document.querySelector('.st-key-recent_research')"))
+        after_heading = heading_geometry()
+        assert after_heading["scrollbars"] == 0
+        assert abs(after_heading["top"] - before_heading["top"]) < 1
+        assert after_heading["height"] == before_heading["height"]
+        assert cards(4) and pack_count(3)
+        cdp.screenshot("recent-research-collapsed.png")
+        click_key("toggle_recent_research")
+        browser.wait_until(lambda: cdp.evaluate(
+            f"!!document.querySelector('.st-key-research_{first['id']}')"
+        ))
+        assert cards(4) and pack_count(3)
+        cdp.call("Input.dispatchMouseEvent", type="mouseMoved", x=600, y=100)
+        click_key(f"research_{second['id']}")
+        browser.wait_until(lambda: cdp.evaluate(
+            f"document.querySelector('.st-key-research_{second['id']} button')"
+            "?.getAttribute('kind')==='primary'"
+        ))
+        inactive_title = navigation_geometry(f"research_{first['id']}")
+        assert menu_visibility(first["id"]) == "hidden"
+        assert menu_visibility(second["id"]) == "visible"
+        assert abs(active_title["x"] - inactive_title["x"]) < 1
+        assert active_title["weight"] == inactive_title["weight"]
+        assert active_title["background"] == "rgb(230, 230, 230)"
+        click_key(f"research_{first['id']}")
+        browser.wait_until(lambda: cdp.evaluate(
+            f"document.querySelector('.st-key-research_{first['id']} button')"
+            "?.getAttribute('kind')==='primary'"
+        ))
+        inactive_favorites = navigation_geometry("open_favorites")
+        new_research = navigation_geometry("sidebar_new_research")
+        caption_left = cdp.evaluate("""(() => {
+          const labels=[...document.querySelectorAll('[data-testid=stSidebar] p')];
+          return ['ATOMIZED STUDIOS','RECENT RESEARCH'].map(text=>
+            labels.find(e=>e.innerText.trim()===text).getBoundingClientRect().left);
+        })()""")
+        assert abs(new_research["x"] - inactive_favorites["x"]) < 1
+        assert all(
+            abs(value["content_x"] - x) < 1
+            for value in (new_research, inactive_favorites, active_title) for x in caption_left
+        )
+        assert all(abs(value["content_x"] - value["button_x"] - 10) < 1
+                   for value in (new_research, inactive_favorites, active_title))
+        assert new_research["x"] > new_research["content_x"]
+        assert inactive_favorites["x"] > inactive_favorites["content_x"]
+        assert new_research["border"] == "0px"
         click_key("open_favorites")
         browser.wait_until(lambda: cards(2))
+        active_favorites = navigation_geometry("open_favorites")
+        assert abs(active_favorites["x"] - inactive_favorites["x"]) < 1
+        assert active_favorites["background"] == "rgb(230, 230, 230)"
+        cdp.screenshot("sidebar-neutral-selection.png")
+        click_key("sidebar_new_research")
+        browser.wait_until(lambda: cdp.evaluate(
+            "document.body.innerText.includes('Describe your creative idea')"
+        ))
+        assert navigation_geometry("sidebar_new_research")["background"] == "rgb(230, 230, 230)"
+        assert all(
+            abs(navigation_geometry("sidebar_new_research")["content_x"] - x) < 1 for x in caption_left
+        )
+        cdp.screenshot("sidebar-new-research-selected.png")
+        click_key("open_favorites")
+        browser.wait_until(lambda: cards(2))
+        print("Sidebar labels stay aligned; selected research/Favorites use neutral grey", flush=True)
         click_key(f"pick_action_favorites_{favorites[1]['id']}")
         browser.wait_until(lambda: pack_count(4))
         click_key(f"favorite_favorites_{favorites[0]['id']}")

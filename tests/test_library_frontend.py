@@ -84,6 +84,23 @@ def test_current_pack_survives_research_switch_and_page_refresh(global_bridge, c
     assert not restored.exception and pack(restored) == expected
 
 
+def test_recent_research_collapse_preserves_active_view_and_pack(global_bridge):
+    app = launch(open_app(), count=4)
+    run = app.session_state["run"]
+    pick(app, run, 0)
+    before = copy.deepcopy(pack(app))
+    widget(app.button, "toggle_recent_research").click().run()
+    assert app.session_state["recent_research_collapsed"]
+    assert not any((item.key or "").startswith("research_") for item in app.sidebar.button)
+    assert card_count(app) == 4 and pack(app) == before
+    open_favorites(app)
+    assert app.session_state["recent_research_collapsed"] and pack(app) == before
+    widget(app.button, "toggle_recent_research").click().run()
+    assert not app.session_state["recent_research_collapsed"]
+    widget(app.button, f"research_{run['id']}").click().run()
+    assert not app.exception and card_count(app) == 4 and pack(app) == before
+
+
 def test_create_rename_switch_and_delete_packs_from_favorites(global_bridge):
     app = launch(open_app(), count=4)
     run = app.session_state["run"]
