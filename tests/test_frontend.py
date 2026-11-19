@@ -678,7 +678,8 @@ def test_saved_run_url_restores_the_exported_selection(bridge):
 def test_filters_preserve_hidden_selections_and_annotation_edits(bridge, client):
     app = launch(open_app())
     run = SearchRun.model_validate(app.session_state["run"])
-    run.results[1].platform = "YouTube"
+    run.results[1].platform = "creativereview.co.uk"
+    run.results[1].source_category = "Creative Press"
     run.results[1].strand = "Execution"
     client.app.state.workflow.repository.put("run", run)
     restored = AppTest.from_file(str(APP), default_timeout=15)
@@ -688,7 +689,7 @@ def test_filters_preserve_hidden_selections_and_annotation_edits(bridge, client)
     first = record["results"][0]
     pick(restored, record, 0)
     edit_borrow(restored, record, first, "Preserve this annotation through filters")
-    widget(restored.multiselect, f"source_filter_{run.id}").set_value(["YouTube"]).run()
+    widget(restored.multiselect, f"source_filter_{run.id}").set_value(["Creative Press"]).run()
     assert card_count(restored) == 1
     assert first["id"] in restored.session_state["pack_drafts"][run.id]["ordered_ids"]
     widget(restored.multiselect, f"source_filter_{run.id}").set_value([]).run()
@@ -711,7 +712,8 @@ def test_filter_popover_count_and_clear_preserve_pack_exports_and_exclusions(bri
     run = SearchRun.model_validate(app.session_state["run"])
     title = "Renewable Energy Brand Film"
     client.patch(f"/search-runs/{run.id}/title", json={"title": title})
-    run.results[1].platform = "YouTube"
+    run.results[1].platform = "creativereview.co.uk"
+    run.results[1].source_category = "Creative Press"
     run.results[1].strand = "Execution"
     client.app.state.workflow.repository.put("run", run)
     app = AppTest.from_file(str(APP), default_timeout=15)
@@ -732,7 +734,7 @@ def test_filter_popover_count_and_clear_preserve_pack_exports_and_exclusions(bri
     button(app, "Export Reference Pack").click().run()
     before = copy.deepcopy(app.session_state["pack_drafts"][run.id])
     download = copy.deepcopy(app.session_state["pack_downloads"][run.id])
-    widget(app.multiselect, f"source_filter_{run.id}").set_value(["YouTube"]).run()
+    widget(app.multiselect, f"source_filter_{run.id}").set_value(["Creative Press"]).run()
     assert card_count(app) == 1
     assert any(item.value == f"1 Results · {title}" for item in app.caption)
     assert widget(app.get("popover"), f"result_filters_{run.id}").proto.popover.label == "1"

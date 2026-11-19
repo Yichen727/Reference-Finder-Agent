@@ -12,6 +12,7 @@ from frontend.curation import EDIT_FIELDS, apply_pack_action, draft_from_run, se
 from frontend.pack_component import pack_list
 from frontend.research_actions import is_busy, open_editor, render_editor, restore_operation
 from frontend.search_progress import pipeline_stage, show_search_progress
+from frontend.source_filters import filter_definitions, normalize_filter_values, reference_category
 
 # A running Streamlit session may still hold layout from before this helper was added.
 # Reload only this stateless module; keep research and pack drafts in session state.
@@ -735,7 +736,7 @@ def selection_panel(run, draft):
         )
 
 
-def result_filters(run, draft, active_filters):
+def result_filters(run, draft, active_filters, categories):
     with st.popover(
         str(active_filters) if active_filters else "",
         icon=":material/tune:", type="tertiary", key=f"result_filters_{run['id']}",
@@ -743,8 +744,7 @@ def result_filters(run, draft, active_filters):
         help=(f"Filter references ({active_filters} selected values)"
               if active_filters else "Filter references"),
     ):
-        platforms = sorted({item["platform"] for item in run["results"]})
-        source_filter = st.multiselect("Sources", platforms, key=f"source_filter_{run['id']}")
+        source_filter = st.multiselect("Sources", categories, key=f"source_filter_{run['id']}")
         st.button(
             "Clear Filters", key=f"clear_filters_{run['id']}", disabled=not active_filters,
             on_click=clear_filters, args=(run["id"],), width="stretch",
@@ -777,6 +777,16 @@ def result_panel():
             st.error("We could not complete this research. Please try a new search.")
         return
     draft = draft_for(run)
+    definitions = filter_definitions(st.session_state.get("source_categories"))
+    categories_by_id = {item["id"]: reference_category(item, definitions) for item in run["results"]}
+    filter_options = [item["name"] for item in definitions if item["name"] in categories_by_id.values()]
+    filter_key = f"source_filter_{run['id']}"
+    if filter_key in st.session_state:
+        normalized = normalize_filter_values(
+            st.session_state[filter_key], run["results"], categories_by_id, filter_options,
+        )
+        if normalized != st.session_state[filter_key]:
+            st.session_state[filter_key] = normalized
     area = None
     if presentation_needs_refresh(run):
         area = show_search_progress(4, "Loading reference cards and available previews.")
@@ -804,7 +814,7 @@ def result_panel():
                         key=f"results_actions_{run['id']}", horizontal=True, width="content",
                         gap="xsmall", vertical_alignment="center",
                     ):
-                        source_filter = result_filters(run, draft, active_filters)
+                        source_filter = result_filters(run, draft, active_filters, filter_options)
                         st.button(
                             "Add References", icon=":material/add:", type="primary",
                             key=f"add_references_{run['id']}", disabled=is_busy(run["id"]),
@@ -819,7 +829,7 @@ def result_panel():
                     item
                     for item in run["results"]
                     if item["id"] not in draft.get("rejected_ids", [])
-                    and (not source_filter or item["platform"] in source_filter)
+                    and (not source_filter or categories_by_id[item["id"]] in source_filter)
                 ]
                 title = presentation.get("title") or next(
                     (
