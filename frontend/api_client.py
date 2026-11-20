@@ -13,7 +13,12 @@ class APIError(Exception):
 class APIClient:
     def __init__(self, base_url: str | None = None):
         # The frontend reads no OpenAI credentials and never calls the model directly.
-        self.base_url = (base_url or os.getenv("BACKEND_URL", "http://127.0.0.1:8000")).rstrip("/")
+        self._base_url = base_url.rstrip("/") if base_url else None
+
+    @property
+    def base_url(self):
+        # Cached clients follow the replacement worker after a cloud resource restart.
+        return self._base_url or os.getenv("BACKEND_URL", "http://127.0.0.1:8000").rstrip("/")
 
     def request(self, method: str, path: str, payload: dict | None = None, *, binary=False):
         try:

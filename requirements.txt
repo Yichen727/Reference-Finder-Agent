@@ -1,0 +1,2 @@
+# Community Cloud uses pip/uv to install the runtime dependencies from pyproject.toml.
+-e .

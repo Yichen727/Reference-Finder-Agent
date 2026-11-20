@@ -1,0 +1,4 @@
+# Entry-specific settings override the repository's local-only listener.
+[server]
+address = "0.0.0.0"
+headless = true

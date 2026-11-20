@@ -5,6 +5,9 @@ browse visual references, and export an editable PowerPoint pack using the suppl
 
 **Already set up? Start at Step 3.**
 
+For a single-app Streamlit Community Cloud deployment, use
+**`cloud/streamlit_app.py`** as the Main file path. See the [cloud deployment steps](docs/CLOUD_DEPLOYMENT.md).
+
 ## 1. Install once
 
 You need Windows, Python 3.12, an internet connection, and an OpenAI API key with

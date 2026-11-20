@@ -9,6 +9,6 @@ dist/
 .env
 .env.*
 !.env.example
-.streamlit/secrets.toml
+**/.streamlit/secrets.toml
 data/
 *.log
