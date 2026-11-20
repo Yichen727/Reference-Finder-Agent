@@ -24,6 +24,7 @@ from frontend.cloud_runtime import (
 def isolate_cloud_secrets(monkeypatch):
     # Never read a developer's actual Streamlit secrets during startup tests.
     monkeypatch.setattr("streamlit.secrets", SimpleNamespace(to_dict=lambda: {}))
+    monkeypatch.setenv("APP_ACCESS_CODE", "offline-cloud-code")
 
 
 @pytest.fixture
@@ -148,6 +149,9 @@ def test_startup_failure_is_sanitized_and_does_not_change_local_backend(cloud_co
 def test_actual_cloud_entry_renders_the_existing_ui_and_reuses_backend_on_rerun(cloud_config):
     entry = ROOT / "cloud" / "streamlit_app.py"
     first = AppTest.from_file(str(entry), default_timeout=30).run()
+    assert len(first.text_input) == 1 and not first.text_area
+    first.text_input[0].input("offline-cloud-code")
+    next(item for item in first.button if item.label == "Unlock").click().run()
     assert not first.exception and not first.error
     assert [item.value for item in first.title] == ["Atomized Reference Finder"]
     assert any(item.label == "Describe your creative idea" for item in first.text_area)
@@ -155,6 +159,9 @@ def test_actual_cloud_entry_renders_the_existing_ui_and_reuses_backend_on_rerun(
     pid = backend.process.pid
     first.run()
     second = AppTest.from_file(str(entry), default_timeout=30).run()
+    assert len(second.text_input) == 1 and not second.text_area
+    second.text_input[0].input("offline-cloud-code")
+    next(item for item in second.button if item.label == "Unlock").click().run()
     assert not first.exception and not second.exception and not second.error
     assert ensure_backend(cloud_config).process.pid == pid
     assert os.environ["BACKEND_URL"] == backend.url
@@ -163,5 +170,7 @@ def test_actual_cloud_entry_renders_the_existing_ui_and_reuses_backend_on_rerun(
 def test_missing_cloud_key_shows_setup_instead_of_connecting_to_another_backend(monkeypatch):
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     app = AppTest.from_file(str(ROOT / "cloud" / "streamlit_app.py"), default_timeout=15).run()
+    app.text_input[0].input("offline-cloud-code")
+    next(item for item in app.button if item.label == "Unlock").click().run()
     assert not app.exception
     assert any("OPENAI_API_KEY" in item.value and "Secrets" in item.value for item in app.error)

@@ -28,6 +28,8 @@ def area(app, label):
 
 @pytest.fixture
 def bridge(client, monkeypatch):
+    # Access control has its own tests; these cases exercise the unlocked UI.
+    monkeypatch.setattr("frontend.access.require_access", lambda: None)
     # Exercise the historical selection contract; global-library tests enable the new capability.
     state = {"requests": [], "fail_export": False, "lose_submission": False,
              "race_export": False, "global_library": False}
@@ -807,6 +809,8 @@ def test_only_backend_validated_preview_bytes_are_rendered(bridge, client):
 
 
 def test_frontend_handles_backend_unavailable(monkeypatch):
+    monkeypatch.setattr("frontend.access.require_access", lambda: None)
+
     def unavailable(*args, **kwargs):
         raise APIError("Cannot connect to the backend.")
 

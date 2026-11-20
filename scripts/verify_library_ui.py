@@ -68,6 +68,10 @@ def seed(config):
 def main():
     ARTIFACTS.mkdir(parents=True)
     browser.ARTIFACTS = ARTIFACTS
+    # Streamlit preloads secret files at startup, before the application runs.
+    # Isolate browser tests from the developer's actual security code and keys.
+    test_secrets = ARTIFACTS / "secrets.toml"
+    test_secrets.write_text('APP_ACCESS_CODE = "offline-browser-code"\n', encoding="utf-8")
     config = Settings(_env_file=None, data_dir=ARTIFACTS / "database", openai_api_key="test-only-key")
     first, second, favorites, original = seed(config)
     environment = {
@@ -76,6 +80,7 @@ def main():
         "OPENAI_API_KEY": "test-only-key",
         "PREVIEW_APPROVED_DOMAINS": "[]",
         "BACKEND_URL": API,
+        "APP_ACCESS_CODE": "offline-browser-code",
     }
     processes, logs = [], []
     cdp = None
@@ -107,6 +112,14 @@ def main():
 
     def cards(count):
         return cdp.evaluate(f"document.querySelectorAll('[class*=st-key-card_select_]').length==={count}")
+
+    def unlock_workspace():
+        browser.wait_until(lambda: cdp.evaluate("!!document.querySelector('input[type=password]')"))
+        assert not cards(4), "Research must stay hidden before verification"
+        cdp.evaluate("document.querySelector('input[type=password]').focus()")
+        cdp.call("Input.insertText", text="offline-browser-code")
+        cdp.evaluate("document.activeElement.blur()")
+        cdp.click("Unlock")
 
     def pack_count(count):
         value = cdp.pack_state()
@@ -245,6 +258,8 @@ def main():
                 "8611",
                 "--server.headless",
                 "true",
+                "--secrets.files",
+                str(test_secrets),
             ],
             "frontend",
         )
@@ -278,6 +293,7 @@ def main():
             "Emulation.setDeviceMetricsOverride", width=1440, height=1000, deviceScaleFactor=1, mobile=False
         )
         cdp.call("Page.navigate", url=FRONTEND + f"/?run={first['id']}")
+        unlock_workspace()
         browser.wait_until(lambda: cards(4) and pack_count(3))
         browser.wait_until(
             lambda: cdp.evaluate("document.querySelectorAll('[class*=st-key-card_bookmark_]').length===4")
@@ -486,6 +502,7 @@ def main():
         assert len(cdp.pack_state()["ids"]) == 4
         request(f"/search-runs/{first['id']}", "DELETE")
         cdp.call("Page.reload")
+        unlock_workspace()
         browser.wait_until(lambda: cards(1) and pack_count(4))
         click_key(f"details_{favorites[1]['id']}")
         browser.wait_until(lambda: cdp.evaluate("document.body.innerText.includes('Why It Fits Your Brief')"))

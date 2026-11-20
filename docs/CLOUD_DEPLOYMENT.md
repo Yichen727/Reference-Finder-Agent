@@ -15,13 +15,16 @@ Local `run.py` and the Windows launcher keep their existing behaviour.
 
    ```toml
    OPENAI_API_KEY = "your-api-key"
+   APP_ACCESS_CODE = "your-private-access-code"
    ```
 
    Optional model choices can be added using `OPENAI_MODEL` and `OPENAI_SEARCH_MODEL`.
    Copy their values from your local configuration if you want identical models.
    [cloud/secrets.toml.example](../cloud/secrets.toml.example) is a ready-to-copy template.
    Do not upload `.env` or an actual `secrets.toml` file.
-5. Deploy. The app waits for the internal API to become healthy before rendering the UI.
+5. Deploy. Each new browser session must enter the security code to unlock the app.
+   Without a configured code, access remains blocked. The internal API starts only
+   after successful verification and becomes healthy before rendering the UI.
    Startup does not call OpenAI. Research requests use the configured account as usual.
 
 No backend URL or separate API deployment is required. The entry configures `BACKEND_URL`
@@ -54,6 +57,7 @@ the repository's loopback-only local configuration and shared theme.
 
 | Message | Action |
 |---|---|
+| Access is not configured | Add APP_ACCESS_CODE as a quoted string in Secrets and reboot. |
 | Add OPENAI_API_KEY | Add the key in Advanced settings > Secrets and reboot. |
 | Check the values in your Streamlit Secrets | Check TOML types and backend setting values; error messages do not echo credentials. |
 | The internal API could not start | Check app logs and writable storage, then reboot. |

@@ -7,6 +7,7 @@ import streamlit as st
 
 from config import current_source_name
 from frontend import layout, library
+from frontend.access import require_access
 from frontend.api_client import APIClient, APIError
 from frontend.curation import EDIT_FIELDS, apply_pack_action, draft_from_run, selection_payload
 from frontend.pack_component import pack_list
@@ -881,6 +882,7 @@ def favorites_panel():
 
 
 def main():
+    require_access()
     stylesheet = Path(__file__).with_name("workspace.css").read_text(encoding="utf-8")
     st.html(f"<style>{stylesheet}</style>")
     st.title("Atomized Reference Finder")

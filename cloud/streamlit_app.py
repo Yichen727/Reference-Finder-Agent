@@ -12,11 +12,13 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from frontend.access import require_access  # noqa: E402
 from frontend.cloud_runtime import CloudStartupError, cloud_settings, ensure_backend  # noqa: E402
 
 
 def main():
     st.set_page_config(page_title="Reference Finder", page_icon="A", layout="wide")
+    require_access()
     try:
         try:
             secrets = st.secrets.to_dict()

@@ -37,6 +37,16 @@ OPENAI_API_KEY=your-api-key
 Keep the other settings from `.env.example` for your first search. Keep `.env` private;
 it is excluded from Git. Searches use your OpenAI account and incur API charges.
 
+Create `.streamlit/secrets.toml` with your private workspace security code:
+
+```toml
+APP_ACCESS_CODE = "your-private-access-code"
+```
+
+This file is excluded from Git. Enter the code in the unlock dialog when opening a
+new browser session. For cloud deployment, add the same setting in the app's Secrets.
+Reloading the browser page starts a new session and requires the code again.
+
 ## 3. Start the app
 
 Double-click **[Start Reference Finder.bat](Start%20Reference%20Finder.bat)**.
