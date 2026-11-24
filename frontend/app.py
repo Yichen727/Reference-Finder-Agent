@@ -419,8 +419,7 @@ def brief_form(health):
             key="brief_concept",
             height=180,
             placeholder=(
-                "Describe your idea, audience, format and tone. Include any budget, timing, "
-                "required elements or things to avoid."
+                "e.g. A cinematic brand film about human connection, featuring authentic storytelling and a warm, emotional tone."
             ),
         )
         if categories is not None:
