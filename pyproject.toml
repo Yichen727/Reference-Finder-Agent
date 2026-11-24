@@ -26,7 +26,7 @@ dev = ["pytest>=8,<10", "ruff>=0.9,<1"]
 include = ["backend*", "frontend*", "config"]
 
 [tool.setuptools.package-data]
-frontend = ["workspace.css", "pack_assets/*.js", "pack_assets/*.css", "preview_assets/*.js", "preview_assets/*.css"]
+frontend = ["workspace.css", "assets/*.png", "pack_assets/*.js", "pack_assets/*.css", "preview_assets/*.js", "preview_assets/*.css"]
 backend = ["templates/*.pptx", "templates/*.json"]
 config = ["*.json"]
 

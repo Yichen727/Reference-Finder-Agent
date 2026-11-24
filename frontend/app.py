@@ -1,3 +1,4 @@
+from base64 import b64encode
 from importlib import reload
 from pathlib import Path
 from time import monotonic
@@ -207,7 +208,10 @@ def toggle_recent_research():
 
 def sidebar():
     with st.sidebar:
-        st.caption("ATOMIZED STUDIOS")
+        logo = Path(__file__).with_name("assets") / "atomized-studios-logo.png"
+        encoded_logo = b64encode(logo.read_bytes()).decode("ascii")
+        st.html(f'<img class="rf-sidebar-logo" src="data:image/png;base64,{encoded_logo}" '
+                'alt="Atomized Studios" />')
         with st.container(key="sidebar_navigation", gap="xxsmall"):
             st.button(
                 "New Research", icon=":material/edit_square:", key="sidebar_new_research",

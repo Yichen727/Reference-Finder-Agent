@@ -1,4 +1,5 @@
 .stMainBlockContainer { padding: 4.5rem 2rem 4rem; }
+.rf-sidebar-logo { display: block; width: 140px; max-width: 100%; height: auto; margin-bottom: 8px; }
 .st-key-research_workspace { --rf-border: #dedbd6; }
 /* Let pointer clicks on decorative arrows reach the native input/control. */
 [data-testid="stSelectbox"] button[aria-haspopup="listbox"],

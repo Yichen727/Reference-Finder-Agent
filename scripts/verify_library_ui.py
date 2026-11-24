@@ -512,8 +512,10 @@ def main():
         })()""")
         caption_left = cdp.evaluate("""(() => {
           const labels=[...document.querySelectorAll('[data-testid=stSidebar] p')];
-          return ['ATOMIZED STUDIOS','RECENT RESEARCH'].map(text=>
-            labels.find(e=>e.innerText.trim()===text).getBoundingClientRect().left);
+          const logo=document.querySelector('[data-testid=stSidebar] .rf-sidebar-logo');
+          if (!logo?.complete || logo.naturalWidth!==712) throw new Error('Sidebar logo did not load');
+          return [logo.getBoundingClientRect().left,
+            labels.find(e=>e.innerText.trim()==='RECENT RESEARCH').getBoundingClientRect().left];
         })()""")
         assert abs(new_research["x"] - inactive_favorites["x"]) < 1
         assert all(
