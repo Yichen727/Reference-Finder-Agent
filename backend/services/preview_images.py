@@ -36,9 +36,18 @@ EXCLUDED_TAGS = {
 }
 DECORATIVE = re.compile(
     r"(?:^|[\s_-])(?:logo|avatar|icon|sprite|tracking|spacer|pixel|advertisement|advert|ads|"
-    r"social|share|related|sidebar|navigation|menu|cookie|author)(?:$|[\s_-])",
+    r"social|share|related|sidebar|navigation|menu|cookie|author|sponsor|recommended)(?:$|[\s_-])",
     re.I,
 )
+ASSET_NOISE = re.compile(
+    r"(?:^|[\s_./-])(?:logo|avatar|icon|sprite|tracking|spacer|pixel|advertisement|advert|ads|cookie)"
+    r"(?:$|[\s_./-])", re.I,
+)
+
+
+def decorative_image_url(url):
+    # Names such as social-campaign.jpg and project-banner.jpg can be real work.
+    return bool(ASSET_NOISE.search(urlsplit(url).path.rsplit("/", 1)[-1]))
 
 
 def dimension(value):
@@ -75,7 +84,7 @@ class PreviewHTML(PublicHTML):
             self.frames.append((tag, blocked, scope))
         if tag != "img" or blocked or len(self.image_candidates) >= 40:
             return
-        if (data.get("alt") or "").strip().lower() in {"logo", "avatar", "icon", "tracking pixel"}:
+        if ASSET_NOISE.search(data.get("alt") or ""):
             return
         width, height = dimension(data.get("width")), dimension(data.get("height"))
         if (width is not None and width < 160) or (height is not None and height < 90):
@@ -99,6 +108,8 @@ class PreviewHTML(PublicHTML):
                 continue
             image_url = canonical_url(urljoin(self.base_url, value.strip()))
             if not image_url or urlsplit(image_url).path.lower().endswith((".svg", ".ico")):
+                continue
+            if decorative_image_url(image_url):
                 continue
             self.image_candidates.append((scope, image_url))
             break

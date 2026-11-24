@@ -252,7 +252,7 @@ def test_expanded_annotation_word_targets_fit_one_slide_without_truncation(clien
     assert len(slides) == 4  # One reference still occupies exactly one slide.
     content = slide_text(slides[2])
     for value in sections.values():
-        assert value in content
+        assert value in " ".join(content.split())
     stored = client.get(f"/search-runs/{run['id']}").json()["selection"]["annotation_overrides"][item["id"]]
     assert all(stored[field] == value for field, value in sections.items())
 

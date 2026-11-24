@@ -15,6 +15,7 @@ from lxml import etree as ET
 from PIL import Image, ImageFont, ImageOps
 
 from backend.core.errors import AppError
+from backend.services.annotation_text import borrow_points
 from backend.services.pptx_package import (
     NS,
     REL,
@@ -93,7 +94,7 @@ def prepare_title_area(shapes, value):
     return size
 
 
-def paragraph(prototype, value, size, *, bold=None, before=0, after=0, link=None):
+def paragraph(prototype, value, size, *, bold=None, before=0, after=0, link=None, bullet=False):
     result = deepcopy(prototype)
     style = result.find("a:r/a:rPr", NS)
     style = deepcopy(style) if style is not None else ET.Element(qn("a:rPr"), lang="en-US")
@@ -104,12 +105,25 @@ def paragraph(prototype, value, size, *, bold=None, before=0, after=0, link=None
     if properties is None:
         properties = ET.Element(qn("a:pPr"))
         result.insert(0, properties)
-    for name, amount in [("lnSpc", 100000), ("spcBef", before * 100), ("spcAft", after * 100)]:
+    spacing = [("lnSpc", 100000), ("spcBef", before * 100), ("spcAft", after * 100)]
+    for name, _ in spacing:
         existing = properties.find(qn("a:" + name))
         if existing is not None:
             properties.remove(existing)
-        node = ET.SubElement(properties, qn("a:" + name))
+    for index, (name, amount) in enumerate(spacing):
+        node = ET.Element(qn("a:" + name))
+        properties.insert(index, node)
         ET.SubElement(node, qn("a:spcPct" if name == "lnSpc" else "a:spcPts"), val=str(amount))
+    if bullet:
+        for name in ("buNone", "buChar", "buAutoNum", "buBlip"):
+            for node in properties.findall(qn("a:" + name)):
+                properties.remove(node)
+        properties.set("marL", "127000")
+        properties.set("indent", "-95250")
+        node = ET.Element(qn("a:buChar"), char="•")
+        trailing = next((child for child in properties
+                         if child.tag in {qn("a:tabLst"), qn("a:defRPr"), qn("a:extLst")}), None)
+        properties.insert(list(properties).index(trailing) if trailing is not None else len(properties), node)
     style.set("sz", str(round(size * 100)))
     if bold is not None:
         style.set("b", "1" if bold else "0")
@@ -156,14 +170,19 @@ def fill_text(slide, item, annotation, page_number, display_title=None):
     set_paragraphs(shapes["TITLE"], [paragraph(title_prototype, title, title_size)])
     shapes["TITLE"].find("p:txBody/a:bodyPr", NS).set("wrap", "none")
     values = [
-        ("WHAT IT IS", text(annotation.what_it_is)),
-        ("WHAT TO BORROW", text(annotation.what_to_borrow)),
-        ("WHY IT FITS BRIEF", text(annotation.why_it_fits)),
+        ("WHAT IT IS", [text(annotation.what_it_is)]),
+        ("WHAT TO BORROW", [text(point) for point in borrow_points(annotation.what_to_borrow)]
+         or ["Not provided."]),
+        ("WHY IT FITS BRIEF", [text(annotation.why_it_fits)]),
     ]
     width, height = shape_size(shapes["BODY COPY"])
     for size in [10, 9.5, 9]:
         required_height = (
-            sum(line_count(value, size, width) * size * 1.35 + 12 * 1.35 + 12 for _, value in values) + 28
+            sum(
+                sum(line_count(point, size, width - (10 if label == "WHAT TO BORROW" else 0))
+                    * size * 1.35 + 2 for point in points)
+                + 12 * 1.35 + 12 for label, points in values
+            ) + 28
         )
         if required_height <= height:
             break
@@ -179,11 +198,13 @@ def fill_text(slide, item, annotation, page_number, display_title=None):
     link = next(p for p in originals if p.xpath(".//a:hlinkClick", namespaces=NS))
     paragraphs = []
     section_gap = max(0, math.floor((height - required_height) / 3))
-    for index, (label, value) in enumerate(values):
+    for index, (label, points) in enumerate(values):
         paragraphs.append(
             paragraph(heading, label, 12, bold=True, before=8 + section_gap if index else 0, after=3)
         )
-        paragraphs.append(paragraph(body, value, size, bold=False, after=2))
+        for point in points:
+            paragraphs.append(paragraph(body, point, size, bold=False, after=2,
+                                        bullet=label == "WHAT TO BORROW"))
     paragraphs.append(
         paragraph(link, "ORIGINAL LINK HERE.", 12, bold=True, before=10 + section_gap, link="rIdOriginal")
     )

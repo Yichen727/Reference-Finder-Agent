@@ -21,6 +21,7 @@ from PIL import Image  # noqa: E402
 from backend.core.config import Settings  # noqa: E402
 from backend.main import create_app  # noqa: E402
 from backend.repositories.sqlite import Repository  # noqa: E402
+from backend.services.thumbnails import PREVIEW_VERSION  # noqa: E402
 from scripts import verify_ui as browser  # noqa: E402
 from tests.fixtures import FixtureProvider  # noqa: E402
 from tests.pptx_helpers import slide_text, slides_from_bytes  # noqa: E402
@@ -46,16 +47,30 @@ def seed(config):
         client.patch(f"/search-runs/{first['id']}/title", json={"title": first["title"]}).raise_for_status()
         thumbnails = client.app.state.thumbnails
         for run in (first, second):
-            for item in client.app.state.workflow.run(run["id"]).results:
+            stored = client.app.state.workflow.run(run["id"])
+            stored.results[0].annotation.what_to_borrow = (
+                "- Frame the action around one person.\n- Repeat a clear visual motif.\n"
+                "- End with a shared purpose."
+            )
+            client.app.state.workflow.repository.put("run", stored)
+            for index, item in enumerate(stored.results):
                 image = BytesIO()
                 Image.new("RGB", (640, 360), "#607b78" if run is first else "#8c7766").save(image, "PNG")
+                preview = {
+                    "image": "data:image/png;base64," + base64.b64encode(image.getvalue()).decode(),
+                    "source_url": "https://studio.test/fixture.png",
+                    "basis": "Offline test fixture", "preview_version": PREVIEW_VERSION,
+                }
+                images = [preview.copy()]
+                if index == 0:
+                    for color in ("#5e7198", "#ae724a"):
+                        image = BytesIO()
+                        Image.new("RGB", (640, 360), color).save(image, "PNG")
+                        images.append({**preview, "image": "data:image/png;base64,"
+                                       + base64.b64encode(image.getvalue()).decode()})
                 thumbnails.store.save_preview(
                     thumbnails.cache_key(item),
-                    {
-                        "image": "data:image/png;base64," + base64.b64encode(image.getvalue()).decode(),
-                        "source_url": "https://studio.test/fixture.png",
-                        "basis": "Offline test fixture",
-                    },
+                    {**preview, "images": images},
                     3600,
                 )
         favorites = [client.put("/favorites", json=locator(first, index)).json() for index in (0, 1)]
@@ -298,10 +313,44 @@ def main():
         browser.wait_until(
             lambda: cdp.evaluate("document.querySelectorAll('[class*=st-key-card_bookmark_]').length===4")
         )
+        card_gallery = (
+            "[...document.querySelectorAll('*')].map(e=>e.shadowRoot)"
+            ".find(r=>r?.querySelector('.preview:not(.detail)'))"
+        )
+        browser.wait_until(lambda: cdp.evaluate(f"!!({card_gallery})?.querySelector('.next')"))
+        initial_pack = cdp.pack_state()
+        first_image = cdp.evaluate(f"({card_gallery}).querySelector('img').src")
+        cdp.evaluate(f"({card_gallery}).querySelector('.next').click()")
+        assert cdp.evaluate(f"({card_gallery}).querySelector('.counter').textContent") == "2/3"
+        assert cdp.evaluate(f"({card_gallery}).querySelector('img').src") != first_image
+        cdp.evaluate(f"({card_gallery}).querySelector('.previous').click()")
+        assert cdp.evaluate(f"({card_gallery}).querySelector('.counter').textContent") == "1/3"
+        assert cdp.pack_state() == initial_pack
+        click_key(f"details_{first['results'][0]['id']}")
+        detail_gallery = (
+            "[...document.querySelectorAll('*')].map(e=>e.shadowRoot)"
+            ".find(r=>r?.querySelector('.preview.detail'))"
+        )
+        browser.wait_until(lambda: cdp.evaluate(f"!!({detail_gallery})?.querySelector('.next')"))
+        cdp.evaluate(f"({detail_gallery}).querySelector('.next').click()")
+        assert cdp.evaluate(f"({detail_gallery}).querySelector('.counter').textContent") == "2/3"
+        assert cdp.evaluate("document.querySelectorAll('[role=dialog] ul li').length") == 3
+        for width in (1440, 390):
+            cdp.call("Emulation.setDeviceMetricsOverride", width=width, height=1000,
+                     deviceScaleFactor=1, mobile=False)
+            browser.wait_until(lambda: cdp.evaluate("document.documentElement.scrollWidth<=innerWidth"))
+            cdp.screenshot(f"gallery-details-{width}.png")
+        cdp.click("Done")
+        browser.wait_until(lambda: cdp.evaluate("!document.querySelector('[role=dialog]')"))
+        cdp.call("Emulation.setDeviceMetricsOverride", width=1440, height=1000,
+                 deviceScaleFactor=1, mobile=False)
+        print("Card/detail galleries, client-only arrows and three borrow bullets passed", flush=True)
+        time.sleep(0.6)  # Let the sidebar's responsive transition finish after the narrow dialog check.
         for item in first["results"]:
             assert cdp.evaluate(f"""(() => {{
               const card=document.querySelector('.st-key-reference_card_{item["id"]}');
-              const image=card.querySelector('.rf-preview').getBoundingClientRect();
+              const host=[...card.querySelectorAll('*')].find(e=>e.shadowRoot?.querySelector('.preview'));
+              const image=(card.querySelector('.rf-preview') || host).getBoundingClientRect();
               const node=card.querySelector('[class*=st-key-card_bookmark_] button');
               const button=node.getBoundingClientRect();
               return button.width===36 && button.height===36 && button.left>=image.left &&

@@ -47,7 +47,8 @@ def test_first_article_image_becomes_cached_card_and_export_preview(preview_envi
     assert result["image"] and result["source_url"] == "https://studio.test/first.png"
     assert result["basis"].startswith("First suitable article image.")
     paths = [request.url.path for request in state["requests"]]
-    assert "/logo.png" not in paths and "/second.png" not in paths and "/footer.png" not in paths
+    assert "/logo.png" not in paths and "/second.png" in paths and "/footer.png" not in paths
+    assert len(result["images"]) == 1  # Identical fixture pixels are deduplicated.
     calls = len(state["requests"])
     assert service.resolve(item) == result
     run = SimpleNamespace(results=[item], selection=SimpleNamespace(ordered_ids=[item.id]))
@@ -98,7 +99,7 @@ def test_first_suitable_image_is_not_skipped_for_a_later_licensed_image(preview_
     )
     result = service.resolve(item)
     assert result["source_url"] == "https://studio.test/unlicensed.png"
-    assert not any(request.url.path == "/licensed.png" for request in state["requests"])
+    assert any(request.url.path == "/licensed.png" for request in state["requests"])
 
 
 @pytest.mark.parametrize("image_format,mime", [("AVIF", "avif"), ("JPEG", "jpeg"), ("WEBP", "webp")])
@@ -145,7 +146,7 @@ def test_avif_validation_still_rejects_corrupt_or_mislabeled_images(preview_envi
     assert service.resolve(item)["image"] is None
 
 
-def test_og_preview_keeps_priority_and_body_is_not_downloaded(preview_environment):
+def test_og_preview_keeps_priority_while_body_gallery_is_collected(preview_environment):
     service, item, state = preview_environment
     article(
         service,
@@ -155,7 +156,7 @@ def test_og_preview_keeps_priority_and_body_is_not_downloaded(preview_environmen
     )
     result = service.resolve(item)
     assert result["source_url"] == "https://studio.test/cover.png"
-    assert not any(request.url.path == "/body.png" for request in state["requests"])
+    assert any(request.url.path == "/body.png" for request in state["requests"])
 
 
 @pytest.mark.parametrize("first", ["broken_og", "broken_body", "pixel"])
@@ -181,12 +182,12 @@ def test_body_fallback_has_bounded_attempts(preview_environment):
         service,
         item,
         state,
-        "<article>" + "".join(f'<img src="/{index}.png">' for index in range(5)) + "</article>",
+        "<article>" + "".join(f'<img src="/{index}.png">' for index in range(9)) + "</article>",
     )
-    state["image_statuses"] = {f"/{index}.png": 404 for index in range(5)}
+    state["image_statuses"] = {f"/{index}.png": 404 for index in range(9)}
     assert not service.resolve(item)["image"]
     paths = [request.url.path for request in state["requests"]]
-    assert "/2.png" in paths and "/3.png" not in paths and "/4.png" not in paths
+    assert "/5.png" in paths and "/6.png" not in paths and "/8.png" not in paths
 
 
 @pytest.mark.parametrize("failure", ["metadata", "image"])

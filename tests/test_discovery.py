@@ -443,6 +443,8 @@ def test_non_public_or_unsafe_reference_links_are_rejected(url):
 
 
 def test_live_frontend_can_search_curate_and_export(settings, discovery_api, monkeypatch):
+    # This pipeline test exercises an unlocked workspace, like the frontend suite.
+    monkeypatch.setattr("frontend.access.require_access", lambda: None)
     with TestClient(create_app(live_settings(settings))) as client:
 
         def request(self, method, path, payload=None, *, binary=False):

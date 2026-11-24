@@ -154,7 +154,8 @@ def test_favorites_details_and_export_survive_deleting_original_research(global_
     client.delete(f"/search-runs/{run['id']}").raise_for_status()
     saved_id = app.session_state["library_state"]["favorites"][0]["id"]
     details(app, {"id": saved_id})
-    assert any(item.value == run["results"][0]["annotation"]["what_to_borrow"] for item in app.markdown)
+    assert any(item.value == "- " + run["results"][0]["annotation"]["what_to_borrow"]
+               for item in app.markdown)
     button(app, "Done").click().run()
     widget(app.button, f"pick_action_favorites_{saved_id}").click().run()
     button(app, "Export Reference Pack").click().run()

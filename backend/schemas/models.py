@@ -135,8 +135,10 @@ class Annotation(Model):
     )
     what_to_borrow: Text = Field(
         description=(
-            "Target 50-80 English words: 2-3 concrete transferable principles and how to apply "
-            "them to this brief. Distinguish proposed adaptations from observed source facts."
+            "Return 2-3 concise, actionable bullet points in this string, each on its own line "
+            "starting with '- '. Target 12-25 English words per point, 40-65 words total. "
+            "Explain concrete transferable principles and how to apply them to this brief. "
+            "Distinguish proposed adaptations from observed source facts."
         )
     )
     why_it_fits: Text = Field(

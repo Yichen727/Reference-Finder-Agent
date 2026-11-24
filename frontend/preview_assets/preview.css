@@ -1,0 +1,9 @@
+.preview { position: relative; aspect-ratio: 16 / 9; width: 100%; overflow: hidden; border-radius: 7px; background: #111; font: 12px/1.3 sans-serif; }
+.preview.detail { max-width: 24rem; margin-inline: auto; }
+.preview img { display: block; width: 100%; height: 100%; object-fit: contain; }
+.preview button { position: absolute; top: 50%; transform: translateY(-50%); display: grid; place-items: center; width: 30px; height: 36px; padding: 0 0 3px; border: 1px solid #ffffff55; border-radius: 7px; background: #18181880; color: white; font: 26px/1 sans-serif; cursor: pointer; }
+.preview .previous { left: 8px; }
+.preview .next { right: 8px; }
+.preview button:hover { background: #181818cf; }
+.preview button:focus-visible, .preview:focus-visible { outline: 2px solid #fff; outline-offset: -3px; }
+.preview .counter { position: absolute; bottom: 8px; right: 9px; padding: 3px 7px; border-radius: 5px; background: #181818a6; color: white; pointer-events: none; }

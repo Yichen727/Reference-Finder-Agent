@@ -201,7 +201,7 @@ def test_remove_and_navigation_preserve_unsaved_annotation_drafts(bridge):
     assert app.session_state["run_id"] == run["id"]
     assert selected(app, run, 0)
     details(app, first)
-    assert any(item.value == "Keep this draft across navigation" for item in app.markdown)
+    assert any(item.value == "- Keep this draft across navigation" for item in app.markdown)
     assert not app.text_area
 
 
@@ -280,7 +280,7 @@ def test_old_preview_session_cache_refreshes_without_losing_pack_draft(bridge):
     app.session_state["presentation_cache_version"] = 4
     app.run()
     assert not app.exception
-    assert app.session_state["presentation_cache_version"] == 5
+    assert app.session_state["presentation_cache_version"] == 6
     assert app.session_state["pack_drafts"][run["id"]] == before
     assert sum(path.endswith("/presentation") for _, path, _ in bridge["requests"]) == calls + 1
 
@@ -697,7 +697,7 @@ def test_filters_preserve_hidden_selections_and_annotation_edits(bridge, client)
     widget(restored.multiselect, f"source_filter_{run.id}").set_value([]).run()
     assert selected(restored, record, 0)
     details(restored, first)
-    assert any(item.value == "Preserve this annotation through filters" for item in restored.markdown)
+    assert any(item.value == "- Preserve this annotation through filters" for item in restored.markdown)
     button(restored, "Done").click().run()
     restored.session_state[f"strand_filter_{run.id}"] = ["Execution"]
     restored.run()

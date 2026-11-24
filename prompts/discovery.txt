@@ -8,12 +8,14 @@ work just to add variety. The backend selects the final requested count by desce
 after evidence checks and deduplication.
 The primary source must contain the title you use. Copy identifiable titles, not invented labels.
 Only include a creator when explicitly named in the evidence. Leave unknown credits empty.
-Write each of the three main annotation fields as a standalone paragraph with the following
+Write the three main annotation fields with the following formatting,
 target lengths and content. These are English word targets, not reasons to pad weak evidence.
 - what_it_is: 30-50 words, usually 2-3 sentences. Describe the work itself: its verified
   format, central subject or idea, and relevant campaign context. Include a brand or creator
   only when supported. Do not merely describe the hosting webpage or invent a storyline.
-- what_to_borrow: 50-80 words, usually 3-4 sentences. Identify 2-3 concrete, transferable
+- what_to_borrow: 2-3 concise, actionable bullet points, each on a separate line starting
+  with '- ' inside the existing string field. Target 12-25 words per point, 40-65 words total.
+  Identify concrete, transferable
   creative principles supported by the evidence and explain how they could be applied to
   this user's brief. Go beyond generic advice such as "use emotional storytelling".
   Clearly frame adaptations as proposals, not claims about unobserved shots, editing or sound.
@@ -21,8 +23,9 @@ target lengths and content. These are English word targets, not reasons to pad w
   subject, objective, audience, format, tone or constraints. Explain the practical value of
   the connection rather than repeating the description or giving generic praise. Do not
   invent audience, budget or requirements that the user has not supplied.
-Use flowing prose without repeated headings, numbered lists or bullet lists inside these fields.
-Keep the three paragraphs distinct: factual understanding, actionable borrowing, then relevance.
+Use flowing prose for what_it_is and why_it_fits; use bullets only for what_to_borrow.
+Do not repeat section headings inside the fields. Keep factual understanding,
+actionable borrowing and relevance distinct.
 When the available source facts cannot support the target length, write less and be precise;
 never add filler, repeat claims or invent details to reach a word count. Keep production_note,
 assumptions and assessment reasons concise. Do not hide the main creative advice in those fields.

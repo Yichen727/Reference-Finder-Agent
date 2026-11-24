@@ -324,6 +324,12 @@ def test_library_preview_is_saved_independently_and_export_makes_no_downloads(cl
         "source_url": "https://studio.test/cover.png",
         "basis": "Website-declared preview image",
     }
+    second_image = BytesIO()
+    Image.new("RGB", (160, 90), "#6677aa").save(second_image, "PNG")
+    preview["images"] = [preview.copy(), {
+        **preview, "image": "data:image/png;base64," + base64.b64encode(second_image.getvalue()).decode(),
+        "source_url": "https://studio.test/second.png",
+    }]
     service = client.app.state.thumbnails
     service.store.save_preview(service.cache_key(item), preview, 3600)
     saved = client.put("/favorites", json=locator(run)).json()

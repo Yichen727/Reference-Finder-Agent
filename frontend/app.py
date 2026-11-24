@@ -5,19 +5,21 @@ from uuid import uuid4
 
 import streamlit as st
 
+from backend.services.annotation_text import borrow_points
 from config import current_source_name
 from frontend import layout, library
 from frontend.access import require_access
 from frontend.api_client import APIClient, APIError
 from frontend.curation import EDIT_FIELDS, apply_pack_action, draft_from_run, selection_payload
 from frontend.pack_component import pack_list
+from frontend.preview_component import render_preview
 from frontend.research_actions import is_busy, open_editor, render_editor, restore_operation
 from frontend.search_progress import pipeline_stage, show_search_progress
 from frontend.source_filters import filter_definitions, normalize_filter_values, reference_category
 
 # A running Streamlit session may still hold layout from before this helper was added.
 # Reload only this stateless module; keep research and pack drafts in session state.
-if not hasattr(layout, "description_summary"):
+if not hasattr(layout, "description_summary") or not hasattr(layout, "preview_images"):
     reload(layout)
 
 client = APIClient()
@@ -499,7 +501,7 @@ def poll_run(run_id):
 
 def presentation_needs_refresh(run):
     cached = st.session_state.get("presentations", {}).get(run["id"])
-    if cached is None or st.session_state.get("presentation_cache_version") != 5:
+    if cached is None or st.session_state.get("presentation_cache_version") != 6:
         return True
     if st.session_state.get("presentation_result_ids", {}).get(run["id"]) != [
         item["id"] for item in run["results"]
@@ -514,9 +516,9 @@ def presentation_needs_refresh(run):
 
 def presentation_for(run):
     presentations = st.session_state.setdefault("presentations", {})
-    if st.session_state.get("presentation_cache_version") != 5:
+    if st.session_state.get("presentation_cache_version") != 6:
         presentations.clear()
-        st.session_state["presentation_cache_version"] = 5
+        st.session_state["presentation_cache_version"] = 6
     loaded_at = st.session_state.setdefault("presentation_loaded_at", {})
     cached = presentations.get(run["id"])
     if presentation_needs_refresh(run):
@@ -547,7 +549,7 @@ def reference_card(run, item, draft, previews):
                     help="Remove from Favorites" if favorite else "Add to Favorites",
                     on_click=library.toggle_favorite, args=(run_id, item_id),
                 )
-        st.html(layout.preview_markup(previews.get(item_id), item["title"]))
+        render_preview(previews.get(item_id), item["title"], key=f"card_preview_{run_id}_{item_id}")
         st.markdown(f"#### {item['title']}")
         st.caption(f"{item['platform']} / {item['strand']}")
         annotation = draft["annotations"][item_id]
@@ -599,7 +601,7 @@ def reference_details(run, item):
     st.subheader(item["title"])
     st.caption(f"{item['platform']} / {item['strand']}")
     st.caption(f"Creator: {item.get('creator') or 'Not listed'}")
-    st.html(layout.preview_markup(preview, item["title"]))
+    render_preview(preview, item["title"], key=f"detail_preview_{run_id}_{item_id}", detail=True)
     original, selection = st.columns(2)
     original.link_button("Open Link", item["source_url"], width="stretch")
     selected = (library.is_selected(run_id, item_id)
@@ -617,15 +619,21 @@ def reference_details(run, item):
         st.rerun()
     for field in ("what_it_is", "what_to_borrow", "why_it_fits"):
         st.markdown(f"**{EDIT_FIELDS[field]}**")
-        st.write(annotation[field])
+        if field == "what_to_borrow":
+            st.markdown("\n".join(f"- {point}" for point in borrow_points(annotation[field]))
+                        or "Not provided.")
+        else:
+            st.write(annotation[field])
     with st.expander("Source & Rights", expanded=False):
         st.markdown("**Rights and usage**")
         st.write(annotation["rights_note"])
         if preview and preview.get("image"):
             st.caption(
-                preview["basis"] + ". Preview use does not establish video or image reproduction rights."
+                (preview.get("basis") or "Source page preview")
+                + ". Preview use does not establish video or image reproduction rights."
             )
-            st.link_button("Thumbnail Source", preview["source_url"])
+            if preview.get("source_url"):
+                st.link_button("Thumbnail Source", preview["source_url"])
         elif preview and preview.get("reason"):
             st.caption("Preview unavailable: " + preview["reason"])
         st.caption(

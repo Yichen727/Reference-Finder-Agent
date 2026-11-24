@@ -36,7 +36,7 @@ def source_page(item, *media):
         "https://player.vimeo.com/video/123456789?h=access-hash&dnt=1",
     ],
 )
-def test_verified_single_embedded_video_uses_official_cover_without_refetching_article(
+def test_verified_single_embedded_video_keeps_official_cover_and_checks_article_gallery(
     preview_environment, video
 ):
     service, item, state = preview_environment
@@ -46,7 +46,8 @@ def test_verified_single_embedded_video_uses_official_cover_without_refetching_a
     result = service.resolve(item)
     assert result["image"].startswith("data:image/png;base64,")
     assert "embedded video" in result["basis"]
-    assert all(request.url.path != "/work/futures" for request in state["requests"])
+    assert sum(request.url.path == "/work/futures" for request in state["requests"]) == 1
+    assert len(result["images"]) == 1
     calls = len(state["requests"])
     assert service.resolve(item) == result
     assert len(state["requests"]) == calls

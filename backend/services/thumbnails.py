@@ -8,6 +8,7 @@ import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from io import BytesIO
+from itertools import chain
 from math import ceil
 from urllib.parse import parse_qs, urlencode, urljoin, urlsplit
 
@@ -15,7 +16,7 @@ import httpx
 from PIL import Image, ImageOps, UnidentifiedImageError
 
 from backend.services.page_verification import USER_AGENT, CheckStopped, PageVerifier, PublicHTML
-from backend.services.preview_images import PreviewHTML
+from backend.services.preview_images import PreviewHTML, decorative_image_url
 from backend.services.source_policy import canonical_url, domain_matches
 
 PLACEHOLDER = {"image": None, "source_url": None, "basis": "Preview unavailable."}
@@ -29,7 +30,9 @@ IMAGE_TYPES = {
 MAX_IMAGE_BYTES = 10_000_000
 MAX_PREVIEW_BYTES = 500_000
 MAX_PREVIEW_DIMENSION = 1280
-PREVIEW_VERSION = 5
+PREVIEW_VERSION = 6
+MAX_PREVIEW_IMAGES = 4
+MAX_BODY_CANDIDATES = 6
 FAILED_PREVIEW_TTL = 120
 PREVIEW_ERRORS = (
     CheckStopped,
@@ -221,15 +224,17 @@ def licensed_image(parser: PublicHTML, image_url: str) -> str | None:
 
 
 def website_images(parser, approved_domains):
-    """Try the declared preview first, then up to three source-declared body images."""
+    """Prefer metadata, then a bounded gallery of source-declared content images."""
     candidates, seen = [], set()
-    og_image = parser.meta.get("og:image", "")
+    og_image = parser.meta.get("og:image") or parser.meta.get("twitter:image", "")
     preview = canonical_url(urljoin(parser.base_url, og_image)) if og_image else None
     urls = [(preview, False)] if preview else []
     urls.extend((url, True) for url in parser.body_images())
     body_count = 0
     for image_url, from_body in urls:
-        if image_url in seen or body_count >= 3:
+        if not image_url or decorative_image_url(image_url):
+            continue
+        if image_url in seen or body_count >= MAX_BODY_CANDIDATES:
             continue
         seen.add(image_url)
         basis = "Website-declared preview image"
@@ -254,7 +259,7 @@ def preview_failure(error):
 
 
 def website_previews(fetcher, item, source, approved_domains, result):
-    """Load body images only if the source's official video cover is unavailable."""
+    """Keep the official video cover first, then collect the original page's gallery."""
     embedded = verified_embedded_provider(item, source)
     attempted = set()
     if embedded:
@@ -322,6 +327,14 @@ def image_preview(fetcher, image_url, basis, *, from_body=False):
     }
 
 
+def image_fingerprint(preview):
+    """Collapse duplicate pixels even when the page uses several CDN URLs."""
+    raw = base64.b64decode(preview["image"].split(",", 1)[1], validate=True)
+    with Image.open(BytesIO(raw)) as image:
+        normalized = ImageOps.exif_transpose(image).convert("RGBA").resize((64, 64))
+        return hashlib.sha256(normalized.tobytes()).hexdigest()
+
+
 class ThumbnailService:
     def __init__(self, settings, store, *, fetcher_factory=PreviewFetcher):
         self.settings, self.store, self.fetcher_factory = settings, store, fetcher_factory
@@ -356,6 +369,7 @@ class ThumbnailService:
         approved = item.thumbnail.model_dump(mode="json") if item.thumbnail else None
         key = self.cache_key(item)
         cached = self.store.preview(key)
+        seed = None
         if cached is not None:
             if cached.get("preview_version") == PREVIEW_VERSION:
                 return cached
@@ -365,20 +379,41 @@ class ThumbnailService:
                     header, encoded = cached["image"].split(",", 1)
                     mime = header.removeprefix("data:").removesuffix(";base64")
                     mime, body = compact_preview(base64.b64decode(encoded, validate=True), mime)
-                    cached = {
+                    seed = {
                         **cached,
                         "image": f"data:{mime};base64," + base64.b64encode(body).decode("ascii"),
                         "preview_version": PREVIEW_VERSION,
                     }
-                    self.store.save_preview(key, cached, 86400)
-                    return cached
+                    # Video platforms still need just their existing cover. Web
+                    # pages get one gallery enrichment when this cache upgrades.
+                    if video_metadata_url(source):
+                        result = {**seed, "images": [seed]}
+                        self.store.save_preview(key, result, 86400)
+                        return result
                 except PREVIEW_ERRORS:
                     pass
         result = {
             **PLACEHOLDER,
+            "images": [],
             "preview_version": PREVIEW_VERSION,
             "reason": "No usable source-declared preview was found.",
         }
+        images, seen_urls, seen_pixels = [], set(), set()
+
+        def add_image(preview):
+            url = canonical_url(preview.get("source_url") or "")
+            pixels = image_fingerprint(preview)
+            if url in seen_urls or pixels in seen_pixels:
+                return
+            seen_urls.add(url)
+            seen_pixels.add(pixels)
+            images.append(preview)
+
+        if seed:
+            try:
+                add_image(seed)
+            except PREVIEW_ERRORS:
+                pass
         try:
             fetcher = self.fetcher_factory(self.settings)
             if deadline is not None:
@@ -396,20 +431,25 @@ class ThumbnailService:
                 image_url, basis = approved["url"], "Previously approved preview metadata"
             elif provider:
                 image_url, basis = provider_cover(fetcher, provider)
-            elif item.platform not in {"YouTube", "Vimeo"}:
+            if not provider and item.platform not in {"YouTube", "Vimeo"}:
                 candidates = website_previews(
                     fetcher, item, source, self.settings.preview_approved_domains, result
                 )
             if image_url:
-                candidates.insert(0, (image_url, basis, False))
+                candidates = chain([(image_url, basis, False)], candidates)
             for image_url, basis, from_body in candidates:
+                if canonical_url(image_url) in seen_urls:
+                    continue
                 try:
-                    result = image_preview(fetcher, image_url, basis, from_body=from_body)
-                    break
+                    add_image(image_preview(fetcher, image_url, basis, from_body=from_body))
+                    if len(images) >= MAX_PREVIEW_IMAGES:
+                        break
                 except PREVIEW_ERRORS as error:
                     result["reason"] = preview_failure(error)
         except PREVIEW_ERRORS as error:
             result["reason"] = preview_failure(error)
+        if images:
+            result = {**images[0], "images": images}
         self.store.save_preview(key, result, 86400 if result["image"] else FAILED_PREVIEW_TTL)
         return result
 
