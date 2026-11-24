@@ -280,7 +280,7 @@ def test_old_preview_session_cache_refreshes_without_losing_pack_draft(bridge):
     app.session_state["presentation_cache_version"] = 4
     app.run()
     assert not app.exception
-    assert app.session_state["presentation_cache_version"] == 6
+    assert app.session_state["presentation_cache_version"] == 7
     assert app.session_state["pack_drafts"][run["id"]] == before
     assert sum(path.endswith("/presentation") for _, path, _ in bridge["requests"]) == calls + 1
 

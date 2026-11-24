@@ -405,6 +405,8 @@ class ReferenceLibrary:
         )
 
     def previews(self, favorite_only=True):
+        from backend.services.preview_images import clean_saved_preview
+
         with self.repository.connection() as conn:
             saved = self.all_saved(conn)
             if favorite_only:
@@ -414,7 +416,8 @@ class ReferenceLibrary:
                 for row in conn.execute("SELECT id,payload FROM library_previews")
             }
         keys = {item.id: self.preview_key(item.snapshots[item.favorite_snapshot]) for item in saved}
-        previews = {item.id: result[keys[item.id]] for item in saved if keys[item.id] in result}
+        previews = {item.id: preview for item in saved
+                    if (preview := clean_saved_preview(result.get(keys[item.id]))) is not None}
         missing = [item for item in saved if item.id not in previews]
         if missing:
             from types import SimpleNamespace
@@ -437,13 +440,15 @@ class ReferenceLibrary:
         return {item.id: previews.get(item.id, {}) for item in saved}
 
     def cached_previews(self, references):
+        from backend.services.preview_images import clean_saved_preview
+
         with self.repository.connection() as conn:
             previews = {
                 row["id"]: json.loads(row["payload"])
                 for row in conn.execute("SELECT id,payload FROM library_previews")
             }
             return {
-                key: previews[self.preview_key(snapshot)]
+                key: preview
                 for key, snapshot in references.items()
-                if self.preview_key(snapshot) in previews
+                if (preview := clean_saved_preview(previews.get(self.preview_key(snapshot)))) is not None
             }

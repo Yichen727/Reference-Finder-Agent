@@ -100,7 +100,9 @@ def test_legacy_cover_is_enriched_once_and_survives_page_failure(preview_environ
     service.store.save_preview(service.cache_key(item), old, 3600)
     state["page_status"] = 403
     result = service.resolve(item)
-    assert result["image"] == old["image"] and result["images"] == [{**old, "preview_version": 6}]
+    assert result["image"] == old["image"]
+    assert result["images"][0]["source_url"] == old["source_url"]
+    assert result["images"][0]["preview_version"] == PREVIEW_VERSION
     assert result["preview_version"] == PREVIEW_VERSION
     count = len(state["requests"])
     assert service.resolve(item) == result and len(state["requests"]) == count

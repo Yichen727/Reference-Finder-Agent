@@ -501,7 +501,7 @@ def poll_run(run_id):
 
 def presentation_needs_refresh(run):
     cached = st.session_state.get("presentations", {}).get(run["id"])
-    if cached is None or st.session_state.get("presentation_cache_version") != 6:
+    if cached is None or st.session_state.get("presentation_cache_version") != 7:
         return True
     if st.session_state.get("presentation_result_ids", {}).get(run["id"]) != [
         item["id"] for item in run["results"]
@@ -516,9 +516,9 @@ def presentation_needs_refresh(run):
 
 def presentation_for(run):
     presentations = st.session_state.setdefault("presentations", {})
-    if st.session_state.get("presentation_cache_version") != 6:
+    if st.session_state.get("presentation_cache_version") != 7:
         presentations.clear()
-        st.session_state["presentation_cache_version"] = 6
+        st.session_state["presentation_cache_version"] = 7
     loaded_at = st.session_state.setdefault("presentation_loaded_at", {})
     cached = presentations.get(run["id"])
     if presentation_needs_refresh(run):

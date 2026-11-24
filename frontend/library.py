@@ -358,7 +358,7 @@ def favorites_context():
 
 def favorites_previews():
     if ("favorites_presentation" not in st.session_state
-            or st.session_state.get("favorites_presentation_version") != 6):
+            or st.session_state.get("favorites_presentation_version") != 7):
         st.session_state["favorites_presentation"] = client.request("GET", "/library/presentation")
-        st.session_state["favorites_presentation_version"] = 6
+        st.session_state["favorites_presentation_version"] = 7
     return st.session_state["favorites_presentation"].get("previews", {})

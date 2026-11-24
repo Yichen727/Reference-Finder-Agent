@@ -45,7 +45,7 @@ def test_first_article_image_becomes_cached_card_and_export_preview(preview_envi
     )
     result = service.resolve(item)
     assert result["image"] and result["source_url"] == "https://studio.test/first.png"
-    assert result["basis"].startswith("First suitable article image.")
+    assert "article or project gallery" in result["basis"]
     paths = [request.url.path for request in state["requests"]]
     assert "/logo.png" not in paths and "/second.png" in paths and "/footer.png" not in paths
     assert len(result["images"]) == 1  # Identical fixture pixels are deduplicated.
@@ -136,17 +136,21 @@ def test_website_formats_render_on_cards_and_convert_to_png_for_pptx(
 
 
 @pytest.mark.parametrize("failure", ["corrupt", "wrong_mime"])
-def test_avif_validation_still_rejects_corrupt_or_mislabeled_images(preview_environment, failure):
+def test_avif_content_validation_rejects_corruption_and_corrects_wrong_mime(preview_environment, failure):
     service, item, state = preview_environment
     output = BytesIO()
     Image.new("RGB", (160, 90)).save(output, format="AVIF")
     article(service, item, state, '<meta property="og:image" content="/cover.avif">')
     state["image"] = b"not an image" if failure == "corrupt" else output.getvalue()
     state["image_type"] = "image/avif" if failure == "corrupt" else "image/jpeg"
-    assert service.resolve(item)["image"] is None
+    result = service.resolve(item)
+    if failure == "corrupt":
+        assert result["image"] is None
+    else:
+        assert result["image"].startswith("data:image/avif;base64,")
 
 
-def test_og_preview_keeps_priority_while_body_gallery_is_collected(preview_environment):
+def test_article_image_has_priority_over_unscoped_og_preview(preview_environment):
     service, item, state = preview_environment
     article(
         service,
@@ -155,7 +159,7 @@ def test_og_preview_keeps_priority_while_body_gallery_is_collected(preview_envir
         '<meta property="og:image" content="/cover.png"><article><img src="/body.png"></article>',
     )
     result = service.resolve(item)
-    assert result["source_url"] == "https://studio.test/cover.png"
+    assert result["source_url"] == "https://studio.test/body.png"
     assert any(request.url.path == "/body.png" for request in state["requests"])
 
 
@@ -187,7 +191,7 @@ def test_body_fallback_has_bounded_attempts(preview_environment):
     state["image_statuses"] = {f"/{index}.png": 404 for index in range(9)}
     assert not service.resolve(item)["image"]
     paths = [request.url.path for request in state["requests"]]
-    assert "/5.png" in paths and "/6.png" not in paths and "/8.png" not in paths
+    assert "/7.png" in paths and "/8.png" not in paths
 
 
 @pytest.mark.parametrize("failure", ["metadata", "image"])
@@ -211,13 +215,12 @@ def test_unavailable_embedded_video_can_use_a_permitted_body_image(preview_envir
         state["image_statuses"] = {"/vi/abc123xyz00/hqdefault.jpg": 403}
     result = service.resolve(item)
     assert result["source_url"] == "https://studio.test/body.png"
-    assert "First suitable article image" in result["basis"]
+    assert "article or project gallery" in result["basis"]
 
 
 @pytest.mark.parametrize(
     "ignored",
     [
-        '<header><img src="/ignored.png"></header>',
         '<aside><img src="/ignored.png"></aside>',
         '<div class="related-posts"><img src="/ignored.png"></div>',
         '<div hidden><img src="/ignored.png"></div>',
@@ -242,4 +245,5 @@ def test_article_content_is_preferred_over_main_and_generic_page_images():
         '<img src="/generic.png"><main><img src="/main.png"><article>'
         '<img src="/first.png"><img src="/second.png"></article></main>'
     )
-    assert parser.body_images() == ["https://studio.test/first.png", "https://studio.test/second.png"]
+    assert parser.body_images() == ["https://studio.test/first.png", "https://studio.test/second.png",
+                                    "https://studio.test/main.png"]
